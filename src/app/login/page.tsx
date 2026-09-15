@@ -38,7 +38,7 @@ export default async function LoginPage({
   return (
     <main style={{ maxWidth: 380, margin: "10vh auto" }}>
       <h1>PNK Suguan System</h1>
-      <p style={{ color: "#555" }}>Phase 1 — development admin</p>
+      <p style={{ color: "#555" }}>Teacher Assignment & Suguan Management</p>
       {error ? <p className="error">{error}</p> : null}
       <form action={action} className="inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
         <label>Email<input name="email" type="email" required /></label>

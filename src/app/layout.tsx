@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PNK Suguan System — Phase 1",
+  title: "PNK Suguan System",
   description: "Teacher Assignment & Suguan Management System (development admin)",
 };
 
