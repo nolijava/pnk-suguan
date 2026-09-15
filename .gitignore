@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# next build output
+.next/
+out/
+next-env.d.ts
+
+# portable toolchain (Node.js) — machine-local, not part of the repo
+.tools/
+
+# embedded postgres binaries and data directories
+.pg/
+
+# environment / secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# local database data
+pgdata/
+
+# logs
+*.log
+
+# misc
+.DS_Store
+*.tsbuildinfo
+
+# assistant/tooling workspace (project id, run docs)
+.freebuff/

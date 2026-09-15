@@ -1,0 +1,297 @@
+import { and, eq, gte, sql } from "drizzle-orm";
+import { getDb, withTransaction, type Database } from "@/server/db/client";
+import {
+  assignments,
+  assignmentHistory,
+  teachers,
+  dako,
+  weeks,
+} from "@/server/db/schema";
+import { assignmentCreateSchema, type AssignmentCreateInput } from "@/lib/validation/schemas";
+import { isTeacherEligibleForDako, type Language } from "@/lib/eligibility";
+import { ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
+import { audit } from "./audit.service";
+import { assertWeekMutable } from "./week.service";
+import type { SessionUser } from "@/server/auth/session";
+
+export interface CreateAssignmentResult {
+  assignment: typeof assignments.$inferSelect;
+  override: boolean;
+}
+
+/**
+ * Create one assignment (manual/auto). Enforces:
+ *  - week must be DRAFT (mutable);
+ *  - one assignment per teacher per week (unique + explicit check);
+ *  - one slot per dako+type per week (unique);
+ *  - language eligibility (§22) unless explicitly overridden with a reason;
+ *  - dako and teacher must be ACTIVE for normal assignment;
+ *  - full history trail via trigger + audit entry.
+ */
+export async function createAssignment(
+  input: AssignmentCreateInput,
+  actor: SessionUser,
+): Promise<CreateAssignmentResult> {
+  assignmentCreateSchema.parse(input);
+  const isOverride = Boolean(input.overrideReason);
+  if (isOverride && !actor.roleCodes.includes("ADMIN")) {
+    // Only ADMIN may bypass the eligibility/lifecycle rules (§7).
+    // SCHEDULER may still write normal assignments and may fill an empty slot.
+    if (!canOverride(actor)) {
+      throw new ValidationError("override requires an administrator");
+    }
+  }
+
+  return withTransaction(async (tx) => {
+    await assertWeekMutable(tx, input.weekId);
+
+    const tRow = await tx.select().from(teachers).where(eq(teachers.id, input.teacherId)).limit(1);
+    const t = tRow[0];
+    if (!t) throw new NotFoundError("teacher not found");
+    const dRow = await tx.select().from(dako).where(eq(dako.id, input.dakoId)).limit(1);
+    const d = dRow[0];
+    if (!d) throw new NotFoundError("dako not found");
+
+    if (!isOverride) {
+      if (t.status !== "ACTIVE") throw new ConflictError(`teacher is ${t.status}`);
+      if (d.status !== "ACTIVE") throw new ConflictError(`dako is ${d.status}`);
+      if (!isTeacherEligibleForDako(t.language as Language, d.language as Language)) {
+        throw new ConflictError(
+          `FILIPINO teacher cannot serve ENGLISH dako (use override with reason if intended)`,
+        );
+      }
+    }
+
+    // Duplicate slot check (friendly error before hitting the unique index).
+    const slot = await tx
+      .select({ id: assignments.id })
+      .from(assignments)
+      .where(
+        and(
+          eq(assignments.weekId, input.weekId),
+          eq(assignments.dakoId, input.dakoId),
+          eq(assignments.assignmentType, input.assignmentType),
+        ),
+      )
+      .limit(1);
+    if (slot.length > 0) {
+      throw new ConflictError(`${input.assignmentType} slot for this dako this week is already filled`);
+    }
+
+    // One assignment per teacher per week (§21) — explicit check for a clear message.
+    const existing = await tx
+      .select({ id: assignments.id })
+      .from(assignments)
+      .where(
+        and(eq(assignments.weekId, input.weekId), eq(assignments.teacherId, input.teacherId)),
+      )
+      .limit(1);
+    if (existing.length > 0) {
+      throw new ConflictError("teacher already has an assignment this week");
+    }
+
+    const inserted = await tx
+      .insert(assignments)
+      .values({
+        weekId: input.weekId,
+        dakoId: input.dakoId,
+        teacherId: input.teacherId,
+        assignmentType: input.assignmentType,
+        assignmentSource: isOverride ? "OVERRIDE" : "MANUAL",
+        isOverride,
+        overrideReason: input.overrideReason ?? null,
+        assignedBy: actor.userId,
+      })
+      .returning();
+    const row = inserted[0]!;
+
+    await audit(
+      {
+        user: actor,
+        action: isOverride ? "OVERRIDING_ASSIGNMENT_RULE" : "CREATED_ASSIGNMENT",
+        entityType: "assignment",
+        entityId: row.id,
+        oldValue: null,
+        newValue: row,
+        reason: input.overrideReason ?? null,
+      },
+      tx as Database,
+    );
+
+    return { assignment: row, override: isOverride };
+  });
+}
+
+function canOverride(actor: SessionUser): boolean {
+  return actor.roleCodes.includes("ADMIN");
+}
+
+/** Change an existing assignment (swap teacher/type/status). Writes history row + audit. */
+export async function changeAssignment(
+  id: string,
+  input: { teacherId?: string; assignmentType?: string; reason: string },
+  actor: SessionUser,
+): Promise<typeof assignments.$inferSelect> {
+  return withTransaction(async (tx) => {
+    const before = (await tx.select().from(assignments).where(eq(assignments.id, id)).limit(1))[0];
+    if (!before) throw new NotFoundError("assignment not found");
+    await assertWeekMutable(tx, before.weekId);
+
+    const patch: Partial<typeof assignments.$inferInsert> = {
+      isOverride: true,
+      overrideReason: input.reason,
+      assignmentSource: "OVERRIDE",
+      assignedBy: actor.userId,
+    };
+    if (input.teacherId) {
+      const tRow = await tx.select().from(teachers).where(eq(teachers.id, input.teacherId)).limit(1);
+      if (!tRow[0]) throw new NotFoundError("teacher not found");
+      const dup = await tx
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(and(eq(assignments.weekId, before.weekId), eq(assignments.teacherId, input.teacherId)))
+        .limit(1);
+      if (dup.length > 0 && dup[0]!.id !== id) {
+        throw new ConflictError("replacement teacher already has an assignment this week");
+      }
+      patch.teacherId = input.teacherId;
+    }
+    if (input.assignmentType) {
+      const slot = await tx
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(
+          and(
+            eq(assignments.weekId, before.weekId),
+            eq(assignments.dakoId, before.dakoId),
+            eq(assignments.assignmentType, input.assignmentType),
+          ),
+        )
+        .limit(1);
+      if (slot.length > 0 && slot[0]!.id !== id) {
+        throw new ConflictError(`${input.assignmentType} slot for this dako this week is already filled`);
+      }
+      patch.assignmentType = input.assignmentType;
+    }
+
+    const updated = await tx.update(assignments).set(patch).where(eq(assignments.id, id)).returning();
+    const row = updated[0]!;
+
+    await audit(
+      {
+        user: actor,
+        action: "CHANGED_ASSIGNMENT",
+        entityType: "assignment",
+        entityId: id,
+        oldValue: before,
+        newValue: row,
+        reason: input.reason,
+      },
+      tx as Database,
+    );
+
+    return row;
+  });
+}
+
+export async function getAssignment(id: string) {
+  const rows = await getDb().select().from(assignments).where(eq(assignments.id, id)).limit(1);
+  if (rows.length === 0) throw new NotFoundError("assignment not found");
+  return rows[0];
+}
+
+export async function listAssignmentsForWeek(weekId: string) {
+  return getDb()
+    .select({
+      id: assignments.id,
+      dakoId: assignments.dakoId,
+      dakoName: dako.name,
+      teacherId: assignments.teacherId,
+      teacherName: sql<string>`concat(${teachers.firstName}, ' ', ${teachers.lastName})`,
+      assignmentType: assignments.assignmentType,
+      status: assignments.status,
+      isOverride: assignments.isOverride,
+    })
+    .from(assignments)
+    .innerJoin(dako, eq(dako.id, assignments.dakoId))
+    .innerJoin(teachers, eq(teachers.id, assignments.teacherId))
+    .where(eq(assignments.weekId, weekId))
+    .orderBy(dako.name, assignments.assignmentType);
+}
+
+export async function getAssignmentHistory(assignmentId: string) {
+  return getDb()
+    .select()
+    .from(assignmentHistory)
+    .where(eq(assignmentHistory.assignmentId, assignmentId))
+    .orderBy(assignmentHistory.changedAt);
+}
+
+/** §35 scheduler input: counts per teacher×dako×type from the counting view. */
+export async function getAssignmentCounts(opts: {
+  teacherId?: string;
+  dakoId?: string;
+  assignmentType?: string;
+  limit?: number;
+} = {}) {
+  const conditions = [];
+  if (opts.teacherId) conditions.push(eq(assignments.teacherId, opts.teacherId));
+  if (opts.dakoId) conditions.push(eq(assignments.dakoId, opts.dakoId));
+  if (opts.assignmentType) conditions.push(eq(assignments.assignmentType, opts.assignmentType));
+  const base = getDb()
+    .select({
+      teacherId: assignments.teacherId,
+      dakoId: assignments.dakoId,
+      assignmentType: assignments.assignmentType,
+      total: sql<number>`count(*)::int`,
+      yearTotal: sql<number>`count(*) filter (where ${weeks.year} = date_part('year', now())::int)::int`,
+      lastAssignedAt: sql<Date | null>`max(${assignments.assignedAt})`,
+    })
+    .from(assignments)
+    .innerJoin(weeks, eq(weeks.id, assignments.weekId))
+    .where(eq(assignments.status, "ASSIGNED"))
+    .groupBy(assignments.teacherId, assignments.dakoId, assignments.assignmentType);
+  const rows = await getDb()
+    .select({
+      teacherId: assignments.teacherId,
+      dakoId: assignments.dakoId,
+      assignmentType: assignments.assignmentType,
+      total: sql<number>`count(*)::int`,
+      yearTotal: sql<number>`count(*) filter (where ${weeks.year} = date_part('year', now())::int)::int`,
+      lastAssignedAt: sql<Date | null>`max(${assignments.assignedAt})`,
+    })
+    .from(assignments)
+    .innerJoin(weeks, eq(weeks.id, assignments.weekId))
+    .where(
+      conditions.length > 0
+        ? and(eq(assignments.status, "ASSIGNED"), ...conditions)
+        : eq(assignments.status, "ASSIGNED"),
+    )
+    .groupBy(assignments.teacherId, assignments.dakoId, assignments.assignmentType)
+    .orderBy(assignments.teacherId, assignments.dakoId)
+    .limit(opts.limit ?? 10000);
+  return rows;
+}
+
+/** Recent assignments per teacher (for balancing heuristics later). */
+export async function recentAssignmentsForTeacher(teacherId: string, limit = 10) {
+  return getDb()
+    .select({
+      id: assignments.id,
+      year: weeks.year,
+      isoWeekNumber: weeks.isoWeekNumber,
+      dakoId: assignments.dakoId,
+      dakoName: dako.name,
+      assignmentType: assignments.assignmentType,
+      assignedAt: assignments.assignedAt,
+    })
+    .from(assignments)
+    .innerJoin(weeks, eq(weeks.id, assignments.weekId))
+    .innerJoin(dako, eq(dako.id, assignments.dakoId))
+    .where(eq(assignments.teacherId, teacherId))
+    .orderBy(sql`${assignments.assignedAt} desc`)
+    .limit(limit);
+}
+
+// keep gte imported for future range queries in tests
+void gte;

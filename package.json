@@ -1,0 +1,47 @@
+{
+  "name": "pnk-suguan-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PNK Teacher Assignment & Suguan Management System — Phase 1 foundation",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:int": "vitest run tests/int",
+    "setup:db": "node scripts/portable-pg.mjs install",
+    "db:test-up": "node scripts/portable-pg.mjs start-test",
+    "db:test-down": "node scripts/portable-pg.mjs stop-test",
+    "db:up": "node scripts/portable-pg.mjs start-dev",
+    "db:down": "node scripts/portable-pg.mjs stop-dev",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:migrate-test": "tsx scripts/migrate.ts --database-url %TEST_DATABASE_URL%",
+    "setup:admin": "tsx scripts/setup-admin.ts",
+    "setup:test-admin": "tsx scripts/setup-admin.ts --database-url %TEST_DATABASE_URL% --email admin@pnk.test --password testPass123!"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
+    "dotenv": "^17.2.1",
+    "drizzle-orm": "^0.45.2",
+    "next": "^16.3.5",
+    "postgres": "^3.4.7",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "drizzle-kit": "^0.31.4",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

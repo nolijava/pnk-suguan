@@ -1,0 +1,8 @@
+export * as TeacherService from "./teacher.service";
+export * as DakoService from "./dako.service";
+export * as AuditService from "./audit.service";
+export * as WeekService from "./week.service";
+export * as AvailabilityService from "./availability.service";
+export * as AssignmentService from "./assignment.service";
+export * as NotificationService from "./notification.service";
+export { audit } from "./audit.service";
