@@ -53,12 +53,30 @@ Auth: httpOnly cookie `pnk_session` (set by login). Every route verifies permiss
 | POST | `/api/weeks` | weeks.write | Create `{ year, isoWeekNumber }` (validates week 53 existence) |
 | POST | `/api/weeks/:id/status` | weeks.write | Transition DRAFT→FINALIZED→PUBLISHED; DRAFT (unlock) = ADMIN only + `reason` |
 
+Phase 3 helpers (service level): `resolveWeek({weekId} | {year, week})`, `adjacentWeek(weekId, ±1)` (ISO start-date arithmetic — year wrap and 52/53-week years handled; adjacent weeks auto-created DRAFT), `currentWeek()`. The lifecycle map and `assertWeekMutable` are unchanged from Phase 1.
+
+## Availability (Phase 3)
+
+Effective-status precedence (read model): **MASTER INACTIVE > WEEKLY INACTIVE > WEEKLY ABSENT > WEEKLY AVAILABLE**; no record = `NOT_ENCODED` = not a scheduling candidate. ABSENT requires a reason. Master-INACTIVE teachers can only carry weekly INACTIVE rows. PUBLISHED weeks are locked; ADMIN correction never changes week status.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/availability?weekId=&q=&availability=&masterStatus=&language=&currentDestinationId=&sort=&order=` | availability.read | Weekly list envelope `{ rows, total, weekId }` — joined teachers⨯availability (no N+1), effective status per row, allowlisted filters incl. `availability=NOT_ENCODED\|AVAILABLE\|ABSENT\|INACTIVE_WEEKLY\|INACTIVE_MASTER`. No purokGrupo filter (reference/display only). |
+| PUT / POST | `/api/availability` | availability.write | Upsert `{ teacherId, weekId, availabilityStatus, reason?, remarks? }`; ABSENT requires reason; master-INACTIVE guard; PUBLISHED lock; no-op skip; audited old→new |
+| POST | `/api/availability/bulk` | availability.write | Batched save `{ changes: [...] }` (max 500, single week) — one transaction, per-row validation, per-row audit; whole batch fails on any invalid row |
+| GET | `/api/availability/fill-blanks?weekId=` | availability.read | Count of Fill-Blanks targets (master-ACTIVE with no record for the week) — powers the UI confirmation |
+| POST | `/api/availability/fill-blanks` | availability.write | Create AVAILABLE records for unencoded actives only; never overwrites; excludes master-INACTIVE; per-row audit |
+| POST | `/api/availability/:weekId/correction` | availability.write (ADMIN) | `{ action: "begin", reason }` / `{ action: "end" }` — §8b correction window on a PUBLISHED week. Week stays PUBLISHED; `assertWeekMutable` and assignments untouched; begin requires reason; grant is ADMIN-session-scoped, 30-min TTL, audited (`UNLOCKED_AVAILABILITY_CORRECTION` / `ENDED_AVAILABILITY_CORRECTION`) |
+| GET | `/api/availability/:weekId/correction` | availability.read | Correction-window state for the UI banner |
+
+Service-level (Phase 4 scheduler inputs): `getTeacherAvailability(teacherId, weekId)`, `getPreviousWeekAvailability(teacherId, weekId)` (prior ISO week, year-wrap safe), `wasAbsentPreviousWeekBatch(weekId)` (set of teacher ids ABSENT in the prior week), `getAvailabilityHistory(teacherId, limit)`, `resolveEffectiveStatus(weekly, master)`. Whether previous-week absence hard-excludes, soft-deprioritizes, or is configurable remains a **Phase 4 scheduling decision**.
+
 ## Availability
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
-| GET | `/api/availability?weekId=` | availability.read | Weekly records for a week |
-| POST | `/api/availability` | availability.write | Upsert `{ teacherId, weekId, availabilityStatus, reason?, remarks? }`; ABSENT requires reason |
+| GET | `/api/availability?weekId=` | availability.read | *(superseded by the Phase 3 section above)* |
+| POST | `/api/availability` | availability.write | *(superseded by the Phase 3 section above)* |
 
 ## Assignments
 
@@ -102,7 +120,8 @@ Auth: httpOnly cookie `pnk_session` (set by login). Every route verifies permiss
 | `/dako` | dako.read | Toolbar (4 filters incl. purok/grupo), sortable paginated table, disable/enable dialogs |
 | `/dako/new`, `/dako/[id]/edit` | dako.write | Forms; anniversary computed note |
 | `/dako/[id]` | dako.read | Details: computed anniversary (years/next/date/days), status + disable info, audit excerpt |
-| `/availability`, `/audit-logs` | per Phase 1 | Weekly availability editor; audit viewer |
+| `/availability` | availability.read | Phase 3 weekly encoding: ISO week nav (prev/next/current + year/week jump, 52/53-safe), effective-status filters incl. NOT_ENCODED, inline status/reason grid, batched save with unsaved-change count, Fill Blanks confirm dialog, master-inactive rows locked with explanation, PUBLISHED lock banner + ADMIN correction flow |
+| `/audit-logs` | audit.read | Audit viewer |
 
 ## Error codes
 

@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, withTransaction, type Database } from "@/server/db/client";
 import { weeks, assignments } from "@/server/db/schema";
 import { weekCreateSchema, weekStatusUpdateSchema } from "@/lib/validation/schemas";
-import { isoWeekDates, isoWeeksInYear } from "@/lib/iso-week";
+import { isoWeek, isoWeekDates, isoWeeksInYear } from "@/lib/iso-week";
 import { ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
 import { audit } from "./audit.service";
 import type { SessionUser } from "@/server/auth/session";
@@ -128,4 +128,46 @@ export async function assertWeekMutable(tx: Database, weekId: string): Promise<v
 export async function weekHasAssignments(tx: Database, weekId: string): Promise<boolean> {
   const rows = await tx.select({ id: assignments.id }).from(assignments).where(eq(assignments.weekId, weekId)).limit(1);
   return rows.length > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 §5 — week resolution / adjacency / current week.
+// Purely additive: the DRAFT → FINALIZED → PUBLISHED lifecycle and
+// assertWeekMutable above are untouched.
+// ---------------------------------------------------------------------------
+
+/** Resolve a week by id, or by {year, week} (auto-creating DRAFT when missing). */
+export async function resolveWeek(
+  ref: { weekId?: string; year?: number; week?: number },
+): Promise<typeof weeks.$inferSelect> {
+  if (ref.weekId) return getWeek(ref.weekId);
+  if (typeof ref.year === "number" && typeof ref.week === "number") {
+    if (ref.week < 1 || ref.week > isoWeeksInYear(ref.year)) {
+      throw new ValidationError(`year ${ref.year} has only ${isoWeeksInYear(ref.year)} ISO weeks`);
+    }
+    return getOrCreateWeek(ref.year, ref.week);
+  }
+  throw new ValidationError("provide either weekId or {year, week}");
+}
+
+/**
+ * The week `offset` ISO weeks from `weekId` (−1 previous, +1 next).
+ * Start-date arithmetic — handles year wrap (W1 ↔ W52/53) and 53-week years.
+ * The adjacent week is auto-created as DRAFT when missing.
+ */
+export async function adjacentWeek(
+  weekId: string,
+  offset: -1 | 1,
+): Promise<typeof weeks.$inferSelect> {
+  const cur = await getWeek(weekId);
+  const start = new Date(`${cur.startDate}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() + offset * 7);
+  const next = isoWeek(start);
+  return getOrCreateWeek(next.year, next.week);
+}
+
+/** The ISO week containing today (auto-created as DRAFT when missing). */
+export async function currentWeek(): Promise<typeof weeks.$inferSelect> {
+  const { year, week } = isoWeek(new Date());
+  return getOrCreateWeek(year, week);
 }

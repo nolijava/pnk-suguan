@@ -7,3 +7,5 @@ export type { FilterDef } from "./toolbar";
 export { Pagination } from "./pagination";
 export { FormField, SelectField, TextAreaField } from "./form-field";
 export { StateCard, Notice } from "./state-card";
+export { AvailabilityEditor } from "./availability-editor";
+export type { EditorRow, AvailabilityEditorProps } from "./availability-editor";

@@ -81,3 +81,21 @@ form.card, .card { background: var(--surface); border: 1px solid var(--border); 
 .detail-grid dt { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
 .detail-grid dd { margin: 0 0 10px; font-size: 15px; }
 .actions-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+
+/* Phase 3 — weekly availability */
+.week-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
+.week-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.week-jump { display: flex; gap: 6px; align-items: end; margin-left: auto; }
+.week-jump label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-muted); }
+.lock-banner { background: #fffbeb; border: 1px solid #fcd34d; border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.lock-banner strong:first-child { color: #92400e; }
+.row-locked td { background: #f8f8f8; color: var(--text-muted); }
+.row-locked .badge { opacity: 0.75; }
+.row-dirty td { background: #eff6ff; }
+.lock-note { font-size: 12px; color: var(--text-muted); }
+.muted { color: var(--text-muted); }
+.save-bar { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.06); z-index: 10; }
+.save-bar span { color: var(--text-muted); font-size: 14px; }
+.save-bar .btn-primary { margin-left: auto; }
+.avail-editor select, .avail-editor input { font-size: 13px; padding: 4px 8px; }
+

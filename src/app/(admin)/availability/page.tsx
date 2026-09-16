@@ -1,7 +1,21 @@
-import { revalidatePath } from "next/cache";
+import Link from "next/link";
 import { requirePermission } from "@/server/auth/guard";
-import { AvailabilityService, TeacherService, WeekService } from "@/server/services";
+import { AvailabilityService, WeekService, DakoService } from "@/server/services";
 import { isoWeek } from "@/lib/iso-week";
+import { availabilityQuerySchema } from "@/lib/validation/query-schemas";
+import { StatusBadge } from "../_components/status-badge";
+import { AvailabilityEditor, type EditorRow } from "../_components/availability-editor";
+import { hasPermission } from "@/server/auth/permissions";
+
+export const dynamic = "force-dynamic";
+
+const AVAILABILITY_FILTERS = [
+  { value: "AVAILABLE", label: "AVAILABLE" },
+  { value: "ABSENT", label: "ABSENT" },
+  { value: "INACTIVE_WEEKLY", label: "INACTIVE (weekly)" },
+  { value: "INACTIVE_MASTER", label: "INACTIVE (master)" },
+  { value: "NOT_ENCODED", label: "NOT ENCODED (no record)" },
+];
 
 export default async function AvailabilityPage({
   searchParams,
@@ -10,75 +24,173 @@ export default async function AvailabilityPage({
 }) {
   const user = await requirePermission("availability.read");
   const sp = await searchParams;
+  const flat = Object.fromEntries(Object.entries(sp).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
+  const notice = typeof sp.notice === "string" ? sp.notice : undefined;
   const error = typeof sp.error === "string" ? sp.error : undefined;
 
-  const now = new Date();
-  const cur = isoWeek(now);
-  const year = Number(sp.year ?? cur.year);
-  const weekNum = Number(sp.week ?? cur.week);
-  const week = await WeekService.getOrCreateWeek(year, weekNum);
-  const teachers = (await TeacherService.listTeachers({ status: "ACTIVE", pageSize: 100 })).rows;
-  const avail = await AvailabilityService.listAvailabilityForWeek(week.id);
-  const byTeacher = new Map(avail.map((a) => [a.teacherId, a]));
+  // Week selection (§8/§9): explicit weekId, else year+week, else current ISO week.
+  const cur = isoWeek(new Date());
+  const year = Number(flat.year ?? cur.year);
+  const weekNum = Number(flat.week ?? cur.week);
+  const week =
+    flat.weekId && typeof flat.weekId === "string" && flat.weekId.length > 0
+      ? await WeekService.resolveWeek({ weekId: flat.weekId })
+      : await WeekService.resolveWeek({ year, week: weekNum });
 
-  async function action(formData: FormData) {
-    "use server";
-    try {
-      const actor = await requirePermission("availability.write");
-      await AvailabilityService.upsertAvailability(
-        {
-          teacherId: String(formData.get("teacherId")),
-          weekId: String(formData.get("weekId")),
-          availabilityStatus: String(formData.get("availabilityStatus")) as "AVAILABLE" | "ABSENT" | "INACTIVE",
-          reason: String(formData.get("reason") ?? "").trim() || undefined,
-        },
-        actor,
-      );
-      revalidatePath("/availability");
-    } catch (e) {
-      const { redirect } = await import("next/navigation");
-      redirect(`/availability?error=${encodeURIComponent(e instanceof Error ? e.message : "operation failed")}`);
-    }
-  }
+  // Filters — parsed with the strict schema; purokGrupo is intentionally absent.
+  const parsed = availabilityQuerySchema.safeParse({ ...flat, weekId: week.id });
+  const q = parsed.success
+    ? parsed.data
+    : ({ weekId: week.id } as import("@/lib/validation/query-schemas").AvailabilityQuery);
+
+  const [list, correctionActive, correctionHolder, fillBlankCount, dakoList] = await Promise.all([
+    AvailabilityService.listWeeklyAvailability(week.id, {
+      search: q.q,
+      availability: q.availability,
+      masterStatus: q.masterStatus,
+      language: q.language,
+      currentDestinationId: q.currentDestinationId,
+      sort: q.sort,
+      order: q.order,
+    }),
+    AvailabilityService.isAvailabilityCorrectionActive(week.id),
+    AvailabilityService.correctionGrantHolder(week.id),
+    AvailabilityService.countFillBlankTargets(week.id),
+    DakoService.listDako({ pageSize: 100 }),
+  ]);
+
+  const canWrite = hasPermission(user.roleCodes, "availability.write");
+  const isAdmin = user.roleCodes.includes("ADMIN");
+
+  // Week navigation links via ISO arithmetic — no weeks created just by rendering nav.
+  const prevStart = new Date(`${week.startDate}T00:00:00Z`);
+  prevStart.setUTCDate(prevStart.getUTCDate() - 7);
+  const nextStart = new Date(`${week.startDate}T00:00:00Z`);
+  nextStart.setUTCDate(nextStart.getUTCDate() + 7);
+  const prev = isoWeek(prevStart);
+  const next = isoWeek(nextStart);
+
+  const baseSearch: Record<string, string | undefined> = {
+    q: q.q,
+    availability: q.availability,
+    masterStatus: q.masterStatus,
+    language: q.language,
+    currentDestinationId: q.currentDestinationId,
+    sort: q.sort,
+    order: q.order,
+  };
+  const filterLink = (over: Record<string, string | undefined>) => {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...baseSearch, ...over })) if (v) params.set(k, v);
+    return `/availability?${params.toString()}`;
+  };
+
+  const rows: EditorRow[] = list.rows;
 
   return (
     <>
-      <h1>Availability — Week {week.isoWeekNumber}, {week.year}</h1>
-      <p style={{ color: "#555" }}>
-        {week.startDate} → {week.endDate} · status {week.status}
-      </p>
+      <div className="page-header">
+        <div>
+          <h1>Weekly Availability</h1>
+          <p>One record per teacher per week. Effective eligibility: master status first, then weekly state.</p>
+        </div>
+      </div>
+
+      <div className="week-nav">
+        <Link className="btn btn-secondary" href={filterLink({ year: String(prev.year), week: String(prev.week) })}>
+          ‹ Week {prev.week}
+        </Link>
+        <div className="week-title">
+          <strong>
+            Week {week.isoWeekNumber} · {week.year}
+          </strong>
+          <span className="info-note">
+            ISO week-year {week.year} · {week.startDate} → {week.endDate} ·{" "}
+          </span>
+          <StatusBadge status={week.status} />
+          {correctionActive ? <span className="badge badge-amber">CORRECTION OPEN</span> : null}
+        </div>
+        <Link className="btn btn-secondary" href={filterLink({ year: String(next.year), week: String(next.week) })}>
+          Week {next.week} ›
+        </Link>
+        {week.year !== cur.year || week.isoWeekNumber !== cur.week ? (
+          <Link className="btn btn-secondary" href={filterLink({ year: String(cur.year), week: String(cur.week) })}>
+            Current week
+          </Link>
+        ) : null}
+        <form method="get" action="/availability" className="week-jump">
+          <label>
+            Year
+            <input type="number" name="year" defaultValue={week.year} min={1900} max={2999} style={{ width: 90 }} />
+          </label>
+          <label>
+            ISO Week
+            <input type="number" name="week" defaultValue={week.isoWeekNumber} min={1} max={53} style={{ width: 70 }} />
+          </label>
+          <button type="submit" className="btn btn-secondary">Go</button>
+        </form>
+      </div>
+
+      {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
-      <table>
-        <thead>
-          <tr><th>Teacher</th><th>Status this week</th><th>Reason</th><th>Set</th></tr>
-        </thead>
-        <tbody>
-          {teachers.map((t) => {
-            const a = byTeacher.get(t.id);
-            return (
-              <tr key={t.id}>
-                <td>{t.firstName} {t.lastName}</td>
-                <td>{a?.availabilityStatus ?? "—"}</td>
-                <td>{a?.reason ?? ""}</td>
-                <td>
-                  <form action={action} className="inline" style={{ padding: 0, border: "none" }}>
-                    <input type="hidden" name="teacherId" value={t.id} />
-                    <input type="hidden" name="weekId" value={week.id} />
-                    <select name="availabilityStatus" defaultValue={a?.availabilityStatus ?? "AVAILABLE"}>
-                      <option value="AVAILABLE">Available</option>
-                      <option value="ABSENT">Absent</option>
-                      <option value="INACTIVE">Inactive</option>
-                    </select>
-                    <input name="reason" placeholder="reason (required for absent)" />
-                    <button type="submit">Save</button>
-                  </form>
-                </td>
-              </tr>
-            );
-          })}
-          {teachers.length === 0 ? <tr><td colSpan={4}>No active teachers yet.</td></tr> : null}
-        </tbody>
-      </table>
+
+      <form method="get" action="/availability" className="toolbar">
+        <input type="hidden" name="year" value={week.year} />
+        <input type="hidden" name="week" value={week.isoWeekNumber} />
+        <input type="search" name="q" placeholder="Search teacher code or name…" defaultValue={q.q ?? ""} />
+        <label className="toolbar-filter">
+          <span>Availability</span>
+          <select name="availability" defaultValue={q.availability ?? ""}>
+            <option value="">All</option>
+            {AVAILABILITY_FILTERS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="toolbar-filter">
+          <span>Master Status</span>
+          <select name="masterStatus" defaultValue={q.masterStatus ?? ""}>
+            <option value="">All</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+          </select>
+        </label>
+        <label className="toolbar-filter">
+          <span>Language</span>
+          <select name="language" defaultValue={q.language ?? ""}>
+            <option value="">All</option>
+            <option value="FILIPINO">Filipino</option>
+            <option value="ENGLISH">English</option>
+          </select>
+        </label>
+        <label className="toolbar-filter">
+          <span>Current Destination</span>
+          <select name="currentDestinationId" defaultValue={q.currentDestinationId ?? ""}>
+            <option value="">All</option>
+            {dakoList.rows.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}{d.status === "DISABLED" ? " (disabled)" : ""}</option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" className="btn btn-primary">Apply</button>
+        <Link className="btn btn-secondary" href={`/availability?year=${week.year}&week=${week.isoWeekNumber}`}>Reset</Link>
+      </form>
+
+      <p className="info-note">
+        {list.total} teacher{list.total === 1 ? "" : "s"} shown · effective status counts master-inactive teachers as
+        unschedulable regardless of any weekly value. No record = NOT_ENCODED = not a scheduling candidate.
+      </p>
+
+      <AvailabilityEditor
+        weekId={week.id}
+        rows={rows}
+        weekStatus={week.status as "DRAFT" | "FINALIZED" | "PUBLISHED"}
+        canWrite={canWrite}
+        canEditNow={canWrite && (week.status !== "PUBLISHED" || (correctionActive && correctionHolder === user.userId))}
+        canBeginCorrection={canWrite && isAdmin && week.status === "PUBLISHED" && !correctionActive}
+        canEndCorrection={canWrite && isAdmin && correctionActive && correctionHolder === user.userId}
+        fillBlankCount={fillBlankCount}
+      />
     </>
   );
 }

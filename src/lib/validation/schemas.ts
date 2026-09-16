@@ -96,6 +96,20 @@ export const availabilityUpsertSchema = z
   })
   .strict();
 
+/** Phase 3 §11 — batched weekly save: one transaction, per-row validation/audit. */
+export const availabilityBulkSchema = z
+  .object({
+    changes: z.array(availabilityUpsertSchema).min(1).max(500),
+  })
+  .strict();
+
+/** Phase 3 §11 refinement 3 — Fill Blanks as AVAILABLE target week. */
+export const availabilityFillBlanksSchema = z
+  .object({
+    weekId: z.string().uuid(),
+  })
+  .strict();
+
 export const assignmentCreateSchema = z
   .object({
     weekId: z.string().uuid(),
