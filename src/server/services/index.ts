@@ -5,4 +5,5 @@ export * as WeekService from "./week.service";
 export * as AvailabilityService from "./availability.service";
 export * as AssignmentService from "./assignment.service";
 export * as NotificationService from "./notification.service";
+export * as SchedulingService from "./scheduling.service";
 export { audit } from "./audit.service";

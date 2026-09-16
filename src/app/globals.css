@@ -97,5 +97,6 @@ form.card, .card { background: var(--surface); border: 1px solid var(--border); 
 .save-bar { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.06); z-index: 10; }
 .save-bar span { color: var(--text-muted); font-size: 14px; }
 .save-bar .btn-primary { margin-left: auto; }
+.row-manual td { background: rgba(29, 78, 216, 0.04); }
 .avail-editor select, .avail-editor input { font-size: 13px; padding: 4px 8px; }
 

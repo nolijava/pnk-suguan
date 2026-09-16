@@ -103,11 +103,22 @@ Service-level (Phase 4 scheduler inputs): `getTeacherAvailability(teacherId, wee
 | POST | `/api/notifications` | session | `{ notificationIds: [...] }` → mark read (ownership-checked) |
 | GET | `/api/audit-logs?entityType=&entityId=&action=&page=&pageSize=` | audit.read (ADMIN) | Append-only trail, optionally scoped to an entity (used by the details pages); paginated, user email joined |
 
-## Scheduling (future phase)
+## Scheduling engine (Phase 4)
+
+Server-side Suguan generation for DRAFT weeks only. Hard eligibility (never bypassed by the engine, never scored around): master-INACTIVE teacher, DISABLED dako, weekly ABSENT/INACTIVE, no record (`NOT_ENCODED`), Filipino teacher → English dako, **previous-week ABSENT** (hard exclusion from automatic scheduling only — ADMIN override allowed afterward with reason). Allocation order: every ACTIVE dako attempts SUGO then RESERBA (dakoCode order); **RESERBA_II draws only from the leftover pool** after all SUGO+RESERBA; empty leftover → `INSUFFICIENT_FOR_RESERBA_II`. Fairness: lowest historical teacher×dako×type count first, then totals / same-dako / same-type / consecutive-same-dako / last-week recency / current-destination preference / `teacherCode` — fully deterministic, no randomness. Unassigned slots carry a reason code (`NO_ELIGIBLE_CANDIDATES` · `ALL_ABSENT_LAST_WEEK` · `LANGUAGE_MISMATCH` · `INSUFFICIENT_FOR_RESERBA_II`) + per-rule exclusion stats. Generation is transaction-serialized on the week row; AUTO assignments are replaced while MANUAL/OVERRIDE rows (and their slots/teachers) are preserved; the complete previous AUTO set is snapshotted into the `REGENERATED_SCHEDULE` audit row. Week stays DRAFT→FINALIZED→PUBLISHED; PUBLISHED is permanently immutable.
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
-| POST | `/api/scheduling/generate` | scheduling.generate | **501 NOT_IMPLEMENTED** — spec §43 |
+| POST | `/api/scheduling/generate` | scheduling.generate | `{ weekId }` → generate/regenerate AUTO assignments for a DRAFT week; returns `{ weekId, regenerated, plan, inserted }`; 409 outside DRAFT |
+| POST | `/api/scheduling/preview` | assignments.read | `{ weekId }` → full slot plan + unassigned reasons, no writes |
+| GET | `/api/scheduling/previous-week-absences?weekId=` | assignments.read | Freshly computed (never cached) count of teachers ABSENT in the immediately preceding week — powers the pre-generation warning |
+| POST | `/api/scheduling/eligibility-check` | assignments.write | `{ weekId, dakoId, teacherId }` → `{ eligible, violatedRules[], overrideAllowed }` — powers the manual-override warning flow |
+
+**Manual overrides (§15):** rule-conforming assignment create/change uses `assignments.write`; a change whose PROPOSED state violates a hard rule is rejected for Scheduler/Encoder and permitted only for ADMIN with a mandatory non-empty reason, stored with `assignmentSource=OVERRIDE` and audited `MANUAL_ASSIGNMENT_OVERRIDE` (reason prefixed `[RULES: …]`). `DAKO_DISABLED` and already-assigned teachers have no override path. Overrides never touch teacher/dako master status, availability, or Current Destination.
+
+**Audit actions:** `GENERATED_SCHEDULE` · `REGENERATED_SCHEDULE` (full previous-AUTO snapshot) · `MANUAL_ASSIGNMENT_OVERRIDE` · existing `CREATED_ASSIGNMENT`/`CHANGED_ASSIGNMENT`/finalize/publish entries.
+
+**Migration 0003 (user-approved):** `assignment_history` deletion is permitted only inside a regeneration transaction via the transaction-local GUC `pnk.regeneration_cascade` (set with `is_local => true`; vanishes on commit/rollback). History UPDATE guard and both `audit_logs` guards remain absolutely append-only.
 
 ## UI pages (server-rendered admin)
 
@@ -121,6 +132,7 @@ Service-level (Phase 4 scheduler inputs): `getTeacherAvailability(teacherId, wee
 | `/dako/new`, `/dako/[id]/edit` | dako.write | Forms; anniversary computed note |
 | `/dako/[id]` | dako.read | Details: computed anniversary (years/next/date/days), status + disable info, audit excerpt |
 | `/availability` | availability.read | Phase 3 weekly encoding: ISO week nav (prev/next/current + year/week jump, 52/53-safe), effective-status filters incl. NOT_ENCODED, inline status/reason grid, batched save with unsaved-change count, Fill Blanks confirm dialog, master-inactive rows locked with explanation, PUBLISHED lock banner + ADMIN correction flow |
+| `/schedule` | assignments.read | Phase 4 weekly schedule: ISO week nav, slot table (teacher/source/status + unassigned reason codes), Generate/Regenerate with the pre-generation absence warning (Proceed · Review/Modify Availability First · Cancel), Finalize/Publish, ADMIN override dialog with violated-rule display + mandatory reason, PUBLISHED fully read-only |
 | `/audit-logs` | audit.read | Audit viewer |
 
 ## Error codes

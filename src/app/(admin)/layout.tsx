@@ -29,6 +29,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <a href="/teachers">Teachers</a>
         <a href="/dako">Dako</a>
         <a href="/availability">Availability</a>
+        <a href="/schedule">Schedule</a>
         {user.roleCodes.includes("ADMIN") ? <a href="/audit-logs">Audit</a> : null}
         <span style={{ marginLeft: "auto", color: "#555", fontSize: 13 }}>
           {user.email} [{user.roleCodes.join(", ")}]

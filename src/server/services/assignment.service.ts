@@ -3,15 +3,17 @@ import { getDb, withTransaction, type Database } from "@/server/db/client";
 import {
   assignments,
   assignmentHistory,
+  teacherAvailability,
   teachers,
   dako,
   weeks,
 } from "@/server/db/schema";
 import { assignmentCreateSchema, type AssignmentCreateInput } from "@/lib/validation/schemas";
 import { isTeacherEligibleForDako, type Language } from "@/lib/eligibility";
-import { ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
+import { ForbiddenError, ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
 import { audit } from "./audit.service";
 import { assertWeekMutable } from "./week.service";
+import { wasAbsentPreviousWeekBatch } from "./availability.service";
 import type { SessionUser } from "@/server/auth/session";
 
 export interface CreateAssignmentResult {
@@ -126,6 +128,60 @@ function canOverride(actor: SessionUser): boolean {
   return actor.roleCodes.includes("ADMIN");
 }
 
+/**
+ * §15 — compute which hard eligibility rules the PROPOSED (teacher, dako, week)
+ * would violate. Mirrors the engine's hard rules so a manual override can never
+ * silently bypass a rule: the caller sees exactly what is being overridden.
+ */
+async function violatedRulesFor(
+  tx: Database,
+  weekId: string,
+  dakoId: string,
+  teacherId: string,
+  currentAssignmentId?: string,
+): Promise<string[]> {
+  const [tRow] = await tx.select().from(teachers).where(eq(teachers.id, teacherId)).limit(1);
+  const [dRow] = await tx.select().from(dako).where(eq(dako.id, dakoId)).limit(1);
+  if (!tRow) throw new NotFoundError("teacher not found");
+  if (!dRow) throw new NotFoundError("dako not found");
+
+  const [wRow] = await tx.select().from(weeks).where(eq(weeks.id, weekId)).limit(1);
+  if (!wRow) throw new NotFoundError("week not found");
+
+  const violated: string[] = [];
+  if (tRow.status !== "ACTIVE") violated.push("TEACHER_INACTIVE_MASTER");
+  if (dRow.status !== "ACTIVE") violated.push("DAKO_DISABLED");
+
+  const [avail] = await tx
+    .select({ status: teacherAvailability.availabilityStatus })
+    .from(teacherAvailability)
+    .where(and(eq(teacherAvailability.teacherId, teacherId), eq(teacherAvailability.weekId, weekId)))
+    .limit(1);
+  if (!avail) violated.push("NOT_ENCODED");
+  else if (avail.status === "ABSENT") violated.push("WEEKLY_ABSENT");
+  else if (avail.status === "INACTIVE") violated.push("WEEKLY_INACTIVE");
+  else if (avail.status !== "AVAILABLE") violated.push("NOT_ENCODED");
+
+  // Previous-week ABSENT — hard for the engine; overrideable by ADMIN (§5/§15).
+  const prevAbsent = await wasAbsentPreviousWeekBatch(weekId);
+  if (prevAbsent.has(teacherId)) violated.push("PREVIOUS_WEEK_ABSENT");
+
+  if (!isTeacherEligibleForDako(tRow.language as Language, dRow.language as Language)) {
+    violated.push("LANGUAGE_MISMATCH");
+  }
+
+  // Already-assigned is a structural constraint, not an eligibility rule:
+  // the unique indexes reject it for everyone (no override path).
+  const dup = await tx
+    .select({ id: assignments.id })
+    .from(assignments)
+    .where(and(eq(assignments.weekId, weekId), eq(assignments.teacherId, teacherId)))
+    .limit(1);
+  if (dup.length > 0 && dup[0]!.id !== currentAssignmentId) violated.push("ALREADY_ASSIGNED_THIS_WEEK");
+
+  return violated;
+}
+
 /** Change an existing assignment (swap teacher/type/status). Writes history row + audit. */
 export async function changeAssignment(
   id: string,
@@ -136,6 +192,19 @@ export async function changeAssignment(
     const before = (await tx.select().from(assignments).where(eq(assignments.id, id)).limit(1))[0];
     if (!before) throw new NotFoundError("assignment not found");
     await assertWeekMutable(tx, before.weekId);
+
+    // §15 — if the PROPOSED state violates a hard eligibility rule, only ADMIN
+    // may proceed, and the reason must state the override (mandatory, non-empty;
+    // already enforced by the Zod schema min(1)).
+    let violated: string[] = [];
+    if (input.teacherId) {
+      violated = await violatedRulesFor(tx, before.weekId, before.dakoId, input.teacherId, id);
+      if (violated.length > 0 && !canOverride(actor)) {
+        throw new ForbiddenError(
+          `assignment change violates hard rule(s): ${violated.join(", ")} — override requires an administrator with a reason`,
+        );
+      }
+    }
 
     const patch: Partial<typeof assignments.$inferInsert> = {
       isOverride: true,
@@ -180,12 +249,15 @@ export async function changeAssignment(
     await audit(
       {
         user: actor,
-        action: "CHANGED_ASSIGNMENT",
+        action: violated.length > 0 ? "MANUAL_ASSIGNMENT_OVERRIDE" : "CHANGED_ASSIGNMENT",
         entityType: "assignment",
         entityId: id,
         oldValue: before,
         newValue: row,
-        reason: input.reason,
+        reason:
+          violated.length > 0
+            ? `[RULES: ${violated.join(", ")}] ${input.reason}`
+            : input.reason,
       },
       tx as Database,
     );

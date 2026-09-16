@@ -153,3 +153,24 @@ export type TeacherCreateInput = z.infer<typeof teacherCreateSchema>;
 export type DakoCreateInput = z.infer<typeof dakoCreateSchema>;
 export type AvailabilityUpsertInput = z.infer<typeof availabilityUpsertSchema>;
 export type AssignmentCreateInput = z.infer<typeof assignmentCreateSchema>;
+
+// ---------------------------------------------------------------------------
+// Phase 4 — scheduling engine
+// ---------------------------------------------------------------------------
+
+export const scheduleGenerateSchema = z
+  .object({
+    weekId: z.string().uuid(),
+  })
+  .strict();
+
+export const eligibilityCheckSchema = z
+  .object({
+    weekId: z.string().uuid(),
+    dakoId: z.string().uuid(),
+    teacherId: z.string().uuid(),
+  })
+  .strict();
+
+export type ScheduleGenerateInput = z.infer<typeof scheduleGenerateSchema>;
+export type EligibilityCheckPayload = z.infer<typeof eligibilityCheckSchema>;

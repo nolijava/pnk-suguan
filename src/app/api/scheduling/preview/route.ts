@@ -3,12 +3,12 @@ import { requirePermission } from "@/server/auth/guard";
 import { SchedulingService } from "@/server/services";
 import type { ScheduleGenerateInput } from "@/lib/validation/schemas";
 
-/** §13 — generate (or regenerate) the AUTO schedule for a DRAFT week. */
+/** §6 — dry-run slot plan (no writes). Same hard rules/scoring as generation. */
 export async function POST(req: Request) {
   try {
-    const user = await requirePermission("scheduling.generate");
+    await requirePermission("assignments.read");
     const body = await parseBody<ScheduleGenerateInput>(req);
-    return ok(await SchedulingService.generateSchedule(body.weekId, user), 201);
+    return ok(await SchedulingService.previewSchedule(body.weekId));
   } catch (err) {
     return fail(err);
   }
