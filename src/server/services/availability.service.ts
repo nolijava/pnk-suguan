@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb, withTransaction, type Database } from "@/server/db/client";
 import {
   teacherAvailability,
   weeks,
   teachers,
   dako,
+  auditLogs,
 } from "@/server/db/schema";
 import {
   availabilityUpsertSchema,
@@ -44,8 +45,13 @@ export function resolveEffectiveStatus(
 // ---------------------------------------------------------------------------
 // PUBLISHED-week availability correction (§8b) — authorization-layer only.
 // The week stays PUBLISHED the whole time; week status / assertWeekMutable /
-// assignment mutability are untouched. Grants are short-lived, in-memory,
-// ADMIN-scoped, and every transition is audited.
+// assignment mutability are untouched.
+//
+// The ACTIVE-GRANT STATE IS DERIVED from the append-only audit trail: the
+// latest UNLOCKED/ENDED correction audit row for the week decides. This is
+// correct across Next.js route bundles (no shared module state), survives
+// server restarts, and needs no schema change. Grants are ADMIN-scoped with a
+// 30-minute TTL (measured from the audit row's timestamp).
 // ---------------------------------------------------------------------------
 
 interface CorrectionGrant {
@@ -57,24 +63,41 @@ interface CorrectionGrant {
 }
 
 const CORRECTION_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const correctionGrants = new Map<string, CorrectionGrant>();
+const CORRECTION_ACTIONS = ["UNLOCKED_AVAILABILITY_CORRECTION", "ENDED_AVAILABILITY_CORRECTION"] as const;
 
-function activeCorrection(weekId: string): CorrectionGrant | null {
-  const grant = correctionGrants.get(weekId);
-  if (!grant) return null;
-  if (grant.expiresAt.getTime() < Date.now()) {
-    correctionGrants.delete(weekId);
-    return null;
-  }
-  return grant;
+async function activeCorrection(tx: Database | undefined, weekId: string): Promise<CorrectionGrant | null> {
+  const db = tx ?? getDb();
+  const rows = await db
+    .select({
+      action: auditLogs.action,
+      userId: auditLogs.userId,
+      reason: auditLogs.reason,
+      createdAt: auditLogs.createdAt,
+    })
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.entityType, "week"),
+        eq(auditLogs.entityId, weekId),
+        inArray(auditLogs.action, [...CORRECTION_ACTIONS]),
+      ),
+    )
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(1);
+  const last = rows[0];
+  if (!last || last.action !== "UNLOCKED_AVAILABILITY_CORRECTION") return null;
+  const startedAt = last.createdAt;
+  const expiresAt = new Date(startedAt.getTime() + CORRECTION_TTL_MS);
+  if (expiresAt.getTime() < Date.now()) return null; // TTL elapsed → locked again
+  return { weekId, adminId: last.userId ?? "", reason: last.reason ?? "", startedAt, expiresAt };
 }
 
-export function isAvailabilityCorrectionActive(weekId: string): boolean {
-  return activeCorrection(weekId) !== null;
+export async function isAvailabilityCorrectionActive(weekId: string): Promise<boolean> {
+  return (await activeCorrection(undefined, weekId)) !== null;
 }
 
-export function correctionGrantHolder(weekId: string): string | null {
-  return activeCorrection(weekId)?.adminId ?? null;
+export async function correctionGrantHolder(weekId: string): Promise<string | null> {
+  return (await activeCorrection(undefined, weekId))?.adminId ?? null;
 }
 
 /** ADMIN-only: allow availability corrections on a PUBLISHED week. Requires a reason; audited. */
@@ -95,27 +118,20 @@ export async function beginAvailabilityCorrection(
   if (row.status !== "PUBLISHED") {
     throw new ConflictError(`week is ${row.status}; availability correction applies only to PUBLISHED weeks`);
   }
-  if (activeCorrection(weekId)) {
+  if (await activeCorrection(undefined, weekId)) {
     throw new ConflictError("an availability correction is already active for this week");
   }
-  const grant: CorrectionGrant = {
-    weekId,
-    adminId: actor.userId,
-    reason: reason.trim(),
-    startedAt: new Date(),
-    expiresAt: new Date(Date.now() + CORRECTION_TTL_MS),
-  };
-  correctionGrants.set(weekId, grant);
+  const expiresAt = new Date(Date.now() + CORRECTION_TTL_MS);
   await audit({
     user: actor,
     action: "UNLOCKED_AVAILABILITY_CORRECTION",
     entityType: "week",
     entityId: weekId,
     oldValue: { status: row.status, availabilityEditable: false },
-    newValue: { status: row.status, availabilityEditable: true, correctionsExpireAt: grant.expiresAt.toISOString() },
-    reason: grant.reason,
+    newValue: { status: row.status, availabilityEditable: true, correctionsExpireAt: expiresAt.toISOString() },
+    reason: reason.trim(),
   });
-  return { weekId, expiresAt: grant.expiresAt };
+  return { weekId, expiresAt };
 }
 
 /** ADMIN-only: end the correction window; the week returns to locked PUBLISHED. Audited. */
@@ -123,12 +139,11 @@ export async function endAvailabilityCorrection(weekId: string, actor: SessionUs
   if (!actor.roleCodes.includes("ADMIN")) {
     throw new ForbiddenError("only ADMIN can end an availability correction");
   }
-  const grant = activeCorrection(weekId);
+  const grant = await activeCorrection(undefined, weekId);
   if (!grant) throw new ConflictError("no availability correction is active for this week");
   const week = await getDb().select().from(weeks).where(eq(weeks.id, weekId)).limit(1);
   const row = week[0];
   if (!row) throw new NotFoundError("week not found");
-  correctionGrants.delete(weekId);
   await audit({
     user: actor,
     action: "ENDED_AVAILABILITY_CORRECTION",
@@ -141,12 +156,12 @@ export async function endAvailabilityCorrection(weekId: string, actor: SessionUs
 }
 
 /** PUBLISHED weeks are locked unless an ADMIN correction grant covers this actor. */
-function assertAvailabilityEditable(
+async function assertAvailabilityEditable(
   week: { id: string; status: string },
   actor: SessionUser,
-): void {
+): Promise<void> {
   if (week.status !== "PUBLISHED") return; // DRAFT and FINALIZED remain editable
-  const grant = activeCorrection(week.id);
+  const grant = await activeCorrection(undefined, week.id);
   if (!grant || grant.adminId !== actor.userId) {
     throw new ConflictError(
       "week is PUBLISHED; availability is locked (ADMIN correction required)",
@@ -193,7 +208,7 @@ async function applyAvailabilityUpsert(
       `teacher ${teacher.teacherCode} is master-INACTIVE; weekly availability cannot override master status`,
     );
   }
-  assertAvailabilityEditable(week, actor);
+  await assertAvailabilityEditable(week, actor);
 
   if (input.availabilityStatus === "ABSENT" && !input.reason) {
     throw new ValidationError("reason is required when marking a teacher ABSENT");
@@ -508,7 +523,7 @@ export async function bulkSetAvailability(
     const w = await tx.select().from(weeks).where(eq(weeks.id, weekId)).limit(1);
     if (!w[0]) throw new NotFoundError("week not found");
     const week = w[0];
-    assertAvailabilityEditable(week, actor);
+    await assertAvailabilityEditable(week, actor);
 
     let saved = 0;
     let skipped = 0;
@@ -561,7 +576,7 @@ export async function fillBlanksAsAvailable(
     const w = await tx.select().from(weeks).where(eq(weeks.id, weekId)).limit(1);
     if (!w[0]) throw new NotFoundError("week not found");
     const week = w[0];
-    assertAvailabilityEditable(week, actor);
+    await assertAvailabilityEditable(week, actor);
 
     const targets = await tx
       .select({ id: teachers.id, teacherCode: teachers.teacherCode })

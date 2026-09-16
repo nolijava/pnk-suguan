@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { requirePermission } from "@/server/auth/guard";
 import { AvailabilityService, WeekService, DakoService } from "@/server/services";
-import { isoWeek } from "@/lib/iso-week";
+import { isoWeek, isoWeeksInYear } from "@/lib/iso-week";
 import { availabilityQuerySchema } from "@/lib/validation/query-schemas";
 import { StatusBadge } from "../_components/status-badge";
 import { AvailabilityEditor, type EditorRow } from "../_components/availability-editor";
 import { hasPermission } from "@/server/auth/permissions";
+import { StateCard } from "../_components/state-card";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,33 @@ export default async function AvailabilityPage({
   const error = typeof sp.error === "string" ? sp.error : undefined;
 
   // Week selection (§8/§9): explicit weekId, else year+week, else current ISO week.
+  // Invalid manual year/week input renders a friendly error state (no crash).
   const cur = isoWeek(new Date());
   const year = Number(flat.year ?? cur.year);
   const weekNum = Number(flat.week ?? cur.week);
+  const weekInputInvalid =
+    flat.weekId === undefined &&
+    (!Number.isInteger(year) || !Number.isInteger(weekNum) ||
+      year < 1900 || year > 2999 || weekNum < 1 || weekNum > isoWeeksInYear(year));
+  if (weekInputInvalid) {
+    return (
+      <>
+        <div className="page-header">
+          <div>
+            <h1>Weekly Availability</h1>
+          </div>
+        </div>
+        <StateCard
+          kind="error"
+          message={`Invalid week selection${Number.isInteger(year) && year >= 1900 && year <= 2999 ? ` — year ${year} has ${isoWeeksInYear(year)} ISO weeks` : " (year must be 1900–2999)"}.`
+        }
+        />
+        <p>
+          <Link className="btn btn-secondary" href="/availability">Back to current week</Link>
+        </p>
+      </>
+    );
+  }
   const week =
     flat.weekId && typeof flat.weekId === "string" && flat.weekId.length > 0
       ? await WeekService.resolveWeek({ weekId: flat.weekId })

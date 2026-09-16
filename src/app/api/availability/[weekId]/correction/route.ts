@@ -36,7 +36,7 @@ export async function GET(
   try {
     await requirePermission("availability.read");
     const { weekId } = await ctx.params;
-    return ok({ weekId, active: isAvailabilityCorrectionActive(weekId) });
+    return ok({ weekId, active: await isAvailabilityCorrectionActive(weekId) });
   } catch (err) {
     return fail(err);
   }
