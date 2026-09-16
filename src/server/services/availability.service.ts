@@ -62,7 +62,11 @@ interface CorrectionGrant {
   expiresAt: Date;
 }
 
-const CORRECTION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+/** Server-side TTL. Defaults to 30 minutes; overridable for deterministic expiry tests. */
+function correctionTtlMs(): number {
+  const raw = Number(process.env.PNK_AVAILABILITY_CORRECTION_TTL_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 30 * 60 * 1000;
+}
 const CORRECTION_ACTIONS = ["UNLOCKED_AVAILABILITY_CORRECTION", "ENDED_AVAILABILITY_CORRECTION"] as const;
 
 async function activeCorrection(tx: Database | undefined, weekId: string): Promise<CorrectionGrant | null> {
@@ -87,7 +91,7 @@ async function activeCorrection(tx: Database | undefined, weekId: string): Promi
   const last = rows[0];
   if (!last || last.action !== "UNLOCKED_AVAILABILITY_CORRECTION") return null;
   const startedAt = last.createdAt;
-  const expiresAt = new Date(startedAt.getTime() + CORRECTION_TTL_MS);
+  const expiresAt = new Date(startedAt.getTime() + correctionTtlMs());
   if (expiresAt.getTime() < Date.now()) return null; // TTL elapsed → locked again
   return { weekId, adminId: last.userId ?? "", reason: last.reason ?? "", startedAt, expiresAt };
 }
@@ -100,7 +104,11 @@ export async function correctionGrantHolder(weekId: string): Promise<string | nu
   return (await activeCorrection(undefined, weekId))?.adminId ?? null;
 }
 
-/** ADMIN-only: allow availability corrections on a PUBLISHED week. Requires a reason; audited. */
+/**
+ * ADMIN-only: allow availability corrections on a PUBLISHED week. Requires a
+ * reason; audited. Serialized on the week row (FOR UPDATE) so concurrent
+ * begin/end/write requests cannot double-open or race the state machine.
+ */
 export async function beginAvailabilityCorrection(
   weekId: string,
   reason: string,
@@ -112,26 +120,34 @@ export async function beginAvailabilityCorrection(
   if (!reason || !reason.trim()) {
     throw new ValidationError("reason is required to unlock availability for correction");
   }
-  const week = await getDb().select().from(weeks).where(eq(weeks.id, weekId)).limit(1);
-  const row = week[0];
-  if (!row) throw new NotFoundError("week not found");
-  if (row.status !== "PUBLISHED") {
-    throw new ConflictError(`week is ${row.status}; availability correction applies only to PUBLISHED weeks`);
-  }
-  if (await activeCorrection(undefined, weekId)) {
-    throw new ConflictError("an availability correction is already active for this week");
-  }
-  const expiresAt = new Date(Date.now() + CORRECTION_TTL_MS);
-  await audit({
-    user: actor,
-    action: "UNLOCKED_AVAILABILITY_CORRECTION",
-    entityType: "week",
-    entityId: weekId,
-    oldValue: { status: row.status, availabilityEditable: false },
-    newValue: { status: row.status, availabilityEditable: true, correctionsExpireAt: expiresAt.toISOString() },
-    reason: reason.trim(),
+  return withTransaction(async (tx) => {
+    // Lock the week row: serializes concurrent begin/end transitions.
+    const locked = await tx
+      .select({ id: weeks.id, status: weeks.status })
+      .from(weeks)
+      .where(eq(weeks.id, weekId))
+      .for("update")
+      .limit(1);
+    const row = locked[0];
+    if (!row) throw new NotFoundError("week not found");
+    if (row.status !== "PUBLISHED") {
+      throw new ConflictError(`week is ${row.status}; availability correction applies only to PUBLISHED weeks`);
+    }
+    if (await activeCorrection(tx, weekId)) {
+      throw new ConflictError("an availability correction is already active for this week");
+    }
+    const expiresAt = new Date(Date.now() + correctionTtlMs());
+    await audit({
+      user: actor,
+      action: "UNLOCKED_AVAILABILITY_CORRECTION",
+      entityType: "week",
+      entityId: weekId,
+      oldValue: { status: row.status, availabilityEditable: false },
+      newValue: { status: row.status, availabilityEditable: true, correctionsExpireAt: expiresAt.toISOString() },
+      reason: reason.trim(),
+    }, tx);
+    return { weekId, expiresAt };
   });
-  return { weekId, expiresAt };
 }
 
 /** ADMIN-only: end the correction window; the week returns to locked PUBLISHED. Audited. */
@@ -139,19 +155,26 @@ export async function endAvailabilityCorrection(weekId: string, actor: SessionUs
   if (!actor.roleCodes.includes("ADMIN")) {
     throw new ForbiddenError("only ADMIN can end an availability correction");
   }
-  const grant = await activeCorrection(undefined, weekId);
-  if (!grant) throw new ConflictError("no availability correction is active for this week");
-  const week = await getDb().select().from(weeks).where(eq(weeks.id, weekId)).limit(1);
-  const row = week[0];
-  if (!row) throw new NotFoundError("week not found");
-  await audit({
-    user: actor,
-    action: "ENDED_AVAILABILITY_CORRECTION",
-    entityType: "week",
-    entityId: weekId,
-    oldValue: { status: row.status, availabilityEditable: true },
-    newValue: { status: row.status, availabilityEditable: false },
-    reason: grant.reason,
+  return withTransaction(async (tx) => {
+    const locked = await tx
+      .select({ id: weeks.id, status: weeks.status })
+      .from(weeks)
+      .where(eq(weeks.id, weekId))
+      .for("update")
+      .limit(1);
+    const row = locked[0];
+    if (!row) throw new NotFoundError("week not found");
+    const grant = await activeCorrection(tx, weekId);
+    if (!grant) throw new ConflictError("no availability correction is active for this week");
+    await audit({
+      user: actor,
+      action: "ENDED_AVAILABILITY_CORRECTION",
+      entityType: "week",
+      entityId: weekId,
+      oldValue: { status: row.status, availabilityEditable: true },
+      newValue: { status: row.status, availabilityEditable: false },
+      reason: grant.reason,
+    }, tx);
   });
 }
 
