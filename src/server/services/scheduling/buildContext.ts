@@ -109,15 +109,24 @@ export async function buildSchedulingContext(
       ]),
     ),
     weekAssignments: new Map(
-      weekAssignRows.map((r) => [
-        r.teacherId,
-        { teacherId: r.teacherId, assignmentType: r.assignmentType, assignmentSource: r.assignmentSource },
-      ]),
+      weekAssignRows
+        .filter((r) => r.assignmentSource !== "AUTO")
+        .map((r) => [
+          r.teacherId,
+          { teacherId: r.teacherId, assignmentType: r.assignmentType, assignmentSource: r.assignmentSource },
+        ]),
     ),
     occupiedSlots: new Set(
       weekAssignRows
         .filter((r) => r.assignmentSource !== "AUTO")
         .map((r) => `${r.dakoId}|${r.assignmentType}`),
+    ),
+    // Only MANUAL/OVERRIDE teachers are immovable for regeneration; AUTO
+    // teachers are replaced by this generation and must NOT block re-allocation.
+    immovableTeachers: new Set(
+      weekAssignRows
+        .filter((r) => r.assignmentSource !== "AUTO")
+        .map((r) => r.teacherId),
     ),
     prevWeekAssignment: prevWeekAssign,
   };

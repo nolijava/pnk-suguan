@@ -61,6 +61,7 @@ export function ScheduleActions({
   const [override, setOverride] = useState<{ row: SlotRow } | null>(null);
   const [overrideRules, setOverrideRules] = useState<string[] | null>(null);
   const [overrideReason, setOverrideReason] = useState("");
+  const [replacementCode, setReplacementCode] = useState("");
   const [overrideErr, setOverrideErr] = useState<string | null>(null);
 
   const locked = weekStatus !== "DRAFT";
@@ -153,52 +154,69 @@ export function ScheduleActions({
 
   function openOverride(row: SlotRow) {
     setOverride({ row });
-    setOverrideRules([]);
+    setOverrideRules(null);
     setOverrideReason("");
+    setReplacementCode(row.teacherCode ?? "");
     setOverrideErr(null);
   }
 
-  function submitOverride() {
+  /** Step 1: resolve teacher + run the server eligibility check; show violated rules. */
+  function checkOverrideRules() {
     if (!override) return;
     if (!overrideReason.trim()) {
       setOverrideErr("A non-empty reason is required for an override.");
       return;
     }
-    const teacherCode = prompt(
-      "Enter the TEACHER CODE of the replacement teacher:",
-      override.row.teacherCode ?? "",
-    );
-    if (!teacherCode || !teacherCode.trim()) {
+    if (!replacementCode.trim()) {
       setOverrideErr("Replacement teacher code is required.");
       return;
     }
     setMessage(null);
     startTransition(async () => {
       try {
-        // 1) resolve teacher id from code
-        const lookup = await fetch(`/api/teachers?q=${encodeURIComponent(teacherCode.trim())}&pageSize=5`);
+        const lookup = await fetch(`/api/teachers?q=${encodeURIComponent(replacementCode.trim())}&pageSize=5`);
         const lbody = await lookup.json();
         const hit = lbody?.data?.rows?.find(
-          (r: { teacherCode: string }) => r.teacherCode.toUpperCase() === teacherCode.trim().toUpperCase(),
+          (r: { teacherCode: string }) => r.teacherCode.toUpperCase() === replacementCode.trim().toUpperCase(),
         );
         if (!hit) {
-          setOverrideErr(`No teacher found with code ${teacherCode.trim()}.`);
+          setOverrideErr(`No teacher found with code ${replacementCode.trim()}.`);
           return;
         }
-        // 2) eligibility check — violated rules displayed before confirmation
-        const violated: string[] = await runEligibilityCheck(hit.id, override.row.dakoId!);
-        if (violated.length > 0 && !confirm(
-          `This override violates: ${violated.join(", ")}. Proceed intentionally with the mandatory reason?`,
-        )) {
-          setOverrideErr(null);
+        const violated: string[] = await runEligibilityCheck(hit.id, override.row.dakoId);
+        setOverrideRules(violated);
+        setOverrideErr(null);
+      } catch {
+        setOverrideErr("network error — rule check failed");
+      }
+    });
+  }
+
+  /** Step 2: explicit confirm — server re-validates and rejects any bypass attempt. */
+  function applyOverride() {
+    if (!override) return;
+    if (!overrideReason.trim()) {
+      setOverrideErr("A non-empty reason is required for an override.");
+      return;
+    }
+    setMessage(null);
+    startTransition(async () => {
+      try {
+        const lookup = await fetch(`/api/teachers?q=${encodeURIComponent(replacementCode.trim())}&pageSize=5`);
+        const lbody = await lookup.json();
+        const hit = lbody?.data?.rows?.find(
+          (r: { teacherCode: string }) => r.teacherCode.toUpperCase() === replacementCode.trim().toUpperCase(),
+        );
+        if (!hit) {
+          setOverrideErr(`No teacher found with code ${replacementCode.trim()}.`);
           return;
         }
-        // 3) apply
+        const violated: string[] = await runEligibilityCheck(hit.id, override.row.dakoId);
         const res = override.row.id
           ? await fetch(`/api/assignments/${override.row.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ teacherId: hit.id, reason: `[RULES: ${violated.join(", ")}] ${overrideReason.trim()}`.replace("[RULES: ] ", "") }),
+              body: JSON.stringify({ teacherId: hit.id, reason: overrideReason.trim() }),
             })
           : await fetch("/api/assignments", {
               method: "POST",
@@ -333,17 +351,44 @@ export function ScheduleActions({
               <strong>{override.row.dakoName}</strong> (currently: {override.row.teacherName ?? "unassigned"}).
             </p>
             <p className="info-note">
-              Violated rules (if any) are checked server-side and shown before you confirm. A non-empty reason is mandatory and audited.
+              Rules are checked server-side before you confirm. A non-empty reason is mandatory and audited.
             </p>
             {overrideErr ? <p className="error">{overrideErr}</p> : null}
             <div className="form-col">
               <label>
-                Reason (required, audited)
-                <textarea rows={3} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} autoFocus />
+                Replacement teacher (code)
+                <input
+                  type="text"
+                  value={replacementCode}
+                  onChange={(e) => { setReplacementCode(e.target.value); setOverrideRules(null); }}
+                  autoFocus
+                />
               </label>
+              <label>
+                Reason (required, audited)
+                <textarea rows={3} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} />
+              </label>
+              {overrideRules !== null ? (
+                overrideRules.length === 0 ? (
+                  <p className="notice">Rule check passed — no hard rules violated.</p>
+                ) : (
+                  <div className="error" role="alert">
+                    <strong>This override violates: {overrideRules.join(", ")}</strong>
+                    <div className="info-note">
+                      ADMIN override intentionally bypasses these rules for this assignment only. Teacher/dako master data,
+                      availability, and Current Destination are never modified. The rules and your reason are audited.
+                    </div>
+                  </div>
+                )
+              ) : null}
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setOverride(null)} disabled={pending}>Cancel</button>
-                <button type="button" className="btn btn-primary" onClick={submitOverride} disabled={pending}>Check &amp; Apply</button>
+                <button type="button" className="btn btn-secondary" onClick={checkOverrideRules} disabled={pending}>Check rules</button>
+                {overrideRules !== null ? (
+                  <button type="button" className="btn btn-primary" onClick={applyOverride} disabled={pending}>
+                    {overrideRules.length > 0 ? "Apply override anyway" : "Apply"}
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>

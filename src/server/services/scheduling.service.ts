@@ -164,15 +164,14 @@ export async function generateSchedule(
 
     const plan = allocate(ctx);
 
-    const insertable = plan.slots.filter(
-      (s) => s.teacherId !== null && !ctx.weekAssignments.has(s.teacherId),
-    );
-    // Skip teachers already holding a MANUAL/OVERRIDE assignment this week.
-    const seenTeachers = new Set(ctx.weekAssignments.keys());
+    // Immobile MANUAL/OVERRIDE rows keep their slots; every plan slot with a
+    // teacher becomes an AUTO row (AUTO deletions already happened above).
     const rowsToInsert = [];
-    for (const s of insertable) {
-      if (seenTeachers.has(s.teacherId!)) continue;
-      seenTeachers.add(s.teacherId!);
+    const seenTeachers = new Set<string>();
+    for (const s of plan.slots) {
+      if (s.teacherId === null) continue;
+      if (ctx.immovableTeachers.has(s.teacherId) || seenTeachers.has(s.teacherId)) continue;
+      seenTeachers.add(s.teacherId);
       rowsToInsert.push({
         weekId,
         dakoId: s.dakoId,

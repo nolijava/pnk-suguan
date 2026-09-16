@@ -208,7 +208,7 @@ export async function changeAssignment(
 
     const patch: Partial<typeof assignments.$inferInsert> = {
       isOverride: true,
-      overrideReason: input.reason,
+      overrideReason: input.reason.replace(/^\[RULES:[^\]]*\]\s*/, ""),
       assignmentSource: "OVERRIDE",
       assignedBy: actor.userId,
     };
@@ -246,6 +246,11 @@ export async function changeAssignment(
     const updated = await tx.update(assignments).set(patch).where(eq(assignments.id, id)).returning();
     const row = updated[0]!;
 
+    // The client may already prefix violated rules; the service owns the
+    // canonical prefix — strip any client copy, then prepend once.
+    const clientPrefix = input.reason.match(/^\[RULES:[^\]]*\]\s*/);
+    const bareReason = clientPrefix ? input.reason.slice(clientPrefix[0].length) : input.reason;
+
     await audit(
       {
         user: actor,
@@ -256,8 +261,8 @@ export async function changeAssignment(
         newValue: row,
         reason:
           violated.length > 0
-            ? `[RULES: ${violated.join(", ")}] ${input.reason}`
-            : input.reason,
+            ? `[RULES: ${violated.join(", ")}] ${bareReason}`
+            : bareReason,
       },
       tx as Database,
     );

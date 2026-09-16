@@ -43,6 +43,7 @@ function ctx(over: Partial<SchedulingContext> = {}): SchedulingContext {
     prevWeekAbsent: new Set(),
     counts: new Map(),
     weekAssignments: new Map(),
+    immovableTeachers: new Set(),
     occupiedSlots: new Set(),
     prevWeekAssignment: new Map(),
     ...over,
@@ -96,11 +97,26 @@ describe("evaluateCandidate — hard-rule matrix (§4)", () => {
     expect(engToFil.eligible).toBe(true);
   });
 
-  it("violates ALREADY_ASSIGNED_THIS_WEEK when the teacher holds a slot", () => {
+  it("violates ALREADY_ASSIGNED_THIS_WEEK when the teacher holds an immovable slot", () => {
     const r = evaluateCandidate(teacher(), dako(), ctx({
       weekAssignments: new Map([["t1", { teacherId: "t1", assignmentType: "SUGO", assignmentSource: "MANUAL" }]]),
     }));
     expect(r.violatedRules).toContain("ALREADY_ASSIGNED_THIS_WEEK");
+  });
+
+  it("excludes immovable MANUAL/OVERRIDE teachers from the allocation pool (§13)", () => {
+    const a = teacher({ teacherId: "a", teacherCode: "TC-A" });
+    const b = teacher({ teacherId: "b", teacherCode: "TC-B" });
+    const d = dako();
+    const c = bigCtx([a, b], [d], []);
+    c.immovableTeachers = new Set(["a"]);
+    c.occupiedSlots = new Set(["d1|SUGO"]); // a's manual row holds the SUGO slot
+    const plan = allocate(c);
+    // SUGO occupied by manual → skipped; RESERBA goes to b (a is immovable);
+    // RESERBA_II: leftover pool empty → unassigned.
+    expect(plan.slots.find((s) => s.assignmentType === "SUGO")).toBeUndefined();
+    expect(plan.slots.find((s) => s.assignmentType === "RESERBA")!.teacherId).toBe("b");
+    expect(plan.slots.find((s) => s.assignmentType === "RESERBA_II")!.teacherId).toBeNull();
   });
 
   it("master-INACTIVE with weekly AVAILABLE still violates (weekly never overrides master, §14)", () => {
@@ -125,6 +141,7 @@ function bigCtx(teachers: CandidateTeacher[], dakos: ScheduleDako[], counts: [st
     prevWeekAbsent: new Set(),
     counts: new Map(counts),
     weekAssignments: new Map(),
+    immovableTeachers: new Set(),
     occupiedSlots: new Set(),
     prevWeekAssignment: new Map(),
   };

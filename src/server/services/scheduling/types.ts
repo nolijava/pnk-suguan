@@ -60,11 +60,17 @@ export interface SchedulingContext {
   prevWeekAbsent: Set<string>;
   /** Historical ASSIGNED counts per teacher×dako×type (primary fairness factor). */
   counts: Map<string, { total: number; yearTotal: number; lastAssignedAt: string | null }>;
-  /** Assignments already in the week (e.g. MANUAL/OVERRIDE rows). */
+  /**
+   * MANUAL/OVERRIDE assignments already in the week — immovable for
+   * generation. AUTO rows are deliberately EXCLUDED: they are replaced by the
+   * current generation and must not block re-allocation.
+   */
   weekAssignments: Map<
     string,
     { teacherId: string; assignmentType: string; assignmentSource: string }
   >;
+  /** Teachers holding MANUAL/OVERRIDE rows — excluded from the candidate pool. */
+  immovableTeachers: Set<string>;
   /** Dako|type slots occupied by surviving MANUAL/OVERRIDE rows — the engine skips them (§13). */
   occupiedSlots: Set<string>;
   /** Dako each teacher was assigned to in the PREVIOUS week (consecutive/recency tie-breakers). */

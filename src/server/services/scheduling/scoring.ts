@@ -171,7 +171,11 @@ export function allocate(ctx: SchedulingContext): AllocationPlan {
     .filter((d) => d.status === "ACTIVE")
     .sort((a, b) => a.dakoCode.localeCompare(b.dakoCode));
   const slots: SlotResult[] = [];
-  const remaining = new Set(ctx.teachers.map((t) => t.teacherId));
+  // Pool = all teachers minus those holding immovable MANUAL/OVERRIDE rows.
+  // AUTO rows are replaceable and their teachers remain allocatable.
+  const remaining = new Set(
+    ctx.teachers.filter((t) => !ctx.immovableTeachers.has(t.teacherId)).map((t) => t.teacherId),
+  );
   const byId = new Map(ctx.teachers.map((t) => [t.teacherId, t]));
   // Slots held by surviving MANUAL/OVERRIDE assignments are engine-skipped (§13).
   const isOccupied = (dakoId: string, type: AssignmentType) =>
