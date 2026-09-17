@@ -25,6 +25,10 @@ export interface ScheduleActionsProps {
   canGenerate: boolean;
   canFinalize: boolean;
   canPublish: boolean;
+  /** Phase 7 — operator-only print-ready PDF of the physical Suguan form. */
+  canPdf: boolean;
+  pdfYear: number;
+  pdfWeek: number;
   absenceCount: number;
   rows: SlotRow[];
   summary: { dakos: number; sugoAssigned: number; reserbaAssigned: number; reserbaIiAssigned: number; unassigned: number } | null;
@@ -53,6 +57,9 @@ export function ScheduleActions({
   canGenerate,
   canFinalize,
   canPublish,
+  canPdf,
+  pdfYear,
+  pdfWeek,
   absenceCount,
   rows,
   summary,
@@ -264,6 +271,18 @@ export function ScheduleActions({
           ) : null}
           {canPublish && weekStatus === "FINALIZED" ? (
             <button type="button" className="btn btn-secondary" onClick={publish} disabled={pending}>Publish</button>
+          ) : null}
+          {canPdf ? (
+            /* Phase 7 — read-only physical-form PDF for the selected week;
+               opens in a new tab for native print/save. Server enforces RBAC. */
+            <a
+              className="btn btn-secondary"
+              href={`/api/schedule/weekly-suguan-pdf?year=${pdfYear}&week=${pdfWeek}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Generate Weekly Suguan PDF
+            </a>
           ) : null}
         </div>
       </div>

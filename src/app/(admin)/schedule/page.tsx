@@ -56,6 +56,8 @@ export default async function SchedulePage({
   const canWrite = hasPerm(user.roleCodes, "assignments.write");
   const canGenerate = hasPerm(user.roleCodes, "scheduling.generate");
   const canFinalize = hasPerm(user.roleCodes, "weeks.finalize");
+  // Phase 7 — same permission gates the PDF endpoint server-side.
+  const canPdf = canWrite;
   const canPublish = hasPerm(user.roleCodes, "weeks.publish");
 
   // Week navigation via ISO arithmetic (same as availability page).
@@ -157,6 +159,9 @@ export default async function SchedulePage({
         canGenerate={canGenerate}
         canFinalize={canFinalize}
         canPublish={canPublish}
+        canPdf={canPdf}
+        pdfYear={year}
+        pdfWeek={weekNum}
         absenceCount={absenceCount.count}
         rows={rows}
         summary={summary}
