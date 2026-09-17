@@ -119,3 +119,25 @@ form.card, .card { background: var(--surface); border: 1px solid var(--border); 
 .sched-section { margin: 20px 0; }
 .sched-section > h2 { margin: 0 0 8px; }
 
+/* Phase 6 — clickable annual cells, badges, tooltips (§2/§6/§7/§13/§14) */
+.cell-btn { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px 8px; font: inherit; cursor: pointer; position: relative; text-align: left; }
+.cell-btn:hover { border-color: var(--primary, #2563eb); }
+.cell-static { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; position: relative; }
+.cell-btn .cell-info, .cell-static .cell-info {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 320px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 10px; font-size: 0.78rem; line-height: 1.45;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.14); visibility: hidden; opacity: 0; transition: opacity 0.1s; }
+.cell-btn:hover .cell-info, .cell-btn:focus-visible .cell-info, .cell-btn:focus .cell-info,
+.cell-static:hover .cell-info, .cell-static:focus .cell-info, .cell-static:focus-within .cell-info {
+  visibility: visible; opacity: 1; }
+.badge-absent { background: #b91c1c; color: #fff; }
+.badge-updated { background: #1d4ed8; color: #fff; }
+.generate-suguan .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+.radio-row { display: block; margin: 6px 0; }
+.link-btn { background: none; border: none; color: var(--primary, #2563eb); cursor: pointer; text-decoration: underline; font: inherit; padding: 0; }
+.success-note { color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius); padding: 8px 12px; }
+.form-span { grid-column: 1 / -1; }
+

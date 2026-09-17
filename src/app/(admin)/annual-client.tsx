@@ -211,16 +211,28 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
     return m;
   }, [cellInfo.modifiedInfo]);
 
-  const weeks = Array.from({ length: schedule.weekCount }, (_, i) => i + 1);
-
-  function onScrollSync(this: HTMLDivElement) {
-    if (syncing.current) return;
-    syncing.current = true;
-    for (const el of wrapRefs.current) {
-      if (el && el !== this) el.scrollLeft = this.scrollLeft;
+  // --- synchronized horizontal scrolling (Phase 5 pattern) ------------------
+  // Native listeners (scroll doesn't bubble reliably through React's root
+  // delegation in all cases); the syncing guard ALWAYS resets, even if an
+  // element detaches mid-scroll (HMR/unmount), so sync can never wedge.
+  useEffect(() => {
+    const els = wrapRefs.current.filter((e): e is HTMLDivElement => e !== null);
+    function onScroll(this: HTMLDivElement) {
+      if (syncing.current) return;
+      syncing.current = true;
+      try {
+        for (const el of els) {
+          if (el !== this && el.isConnected) el.scrollLeft = this.scrollLeft;
+        }
+      } finally {
+        syncing.current = false;
+      }
     }
-    syncing.current = false;
-  }
+    els.forEach((el) => el.addEventListener("scroll", onScroll, { passive: true }));
+    return () => els.forEach((el) => el.removeEventListener("scroll", onScroll));
+  }, [schedule.year]);
+
+  const weeks = Array.from({ length: schedule.weekCount }, (_, i) => i + 1);
 
   return (
     <section className="annual-section">
@@ -256,7 +268,6 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
             ref={(el) => {
               wrapRefs.current[ti] = el;
             }}
-            onScroll={onScrollSync}
             tabIndex={0}
             role="region"
             aria-label={`${TYPE_LABEL[table.assignmentType]} annual schedule ${schedule.year}`}
@@ -333,6 +344,17 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                                   ) : null}
                                 </span>
                               )
+                            ) : absent ? (
+                              /* §6/§7 — cell emptied by a teacher-absent clear must
+                                 still visibly indicate the absence, from persisted
+                                 audit data (not color alone, hover AND focus). */
+                              <span className="cell-static" tabIndex={0}>
+                                <span className="info-note">{absent.teacherName}</span>
+                                <AbsentBadge />
+                                <span className="cell-info" role="note">
+                                  {`${absent.teacherName} — ABSENT · Reason: ${absent.reason} · Week: ${weekLabel(i + 1)} · ${TYPE_LABEL[table.assignmentType]} · Recorded by: ${absent.actorName ?? "unknown"} · At: ${fmtDate(absent.at)}`}
+                                </span>
+                              </span>
                             ) : (
                               <span className="info-note">—</span>
                             )}
