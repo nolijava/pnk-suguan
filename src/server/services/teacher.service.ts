@@ -22,7 +22,15 @@ export async function createTeacher(
       }
     }
     try {
-      const inserted = await tx.insert(teachers).values(input).returning();
+      // Phase 6 §20-§21: concurrency-safe auto code when omitted (UI never
+      // sends one). nextval INSIDE the transaction — simultaneous creates
+      // never collide; gaps from rollbacks are permanent (no reuse).
+      let teacherCode = input.teacherCode;
+      if (!teacherCode) {
+        const n = await tx.execute(sql`select nextval('pnk_teacher_code_seq') as nextval`);
+        teacherCode = `PNK-G-${n[0]!.nextval}`;
+      }
+      const inserted = await tx.insert(teachers).values({ ...input, teacherCode }).returning();
       const row = inserted[0]!;
       await audit(
         { user: actor, action: "CREATED_TEACHER", entityType: "teacher", entityId: row.id, newValue: row },

@@ -14,7 +14,9 @@ export const userStatusSchema = z.enum(["ACTIVE", "INACTIVE"]);
 
 const teacherBaseSchema = z
   .object({
-    teacherCode: z.string().min(1).max(32),
+    // Phase 6 §20: optional on create — server auto-generates PNK-G-#### via a
+    // DB sequence when omitted (UI never sends a code).
+    teacherCode: z.string().min(1).max(32).optional(),
     firstName: z.string().min(1).max(100),
     middleName: z.string().max(100).optional(),
     lastName: z.string().min(1).max(100),
@@ -56,7 +58,9 @@ export const teacherDeactivateSchema = z.object({
 
 export const dakoCreateSchema = z
   .object({
-    dakoCode: z.string().min(1).max(32),
+    // Phase 6 §23: optional on create — server auto-generates ILGD-### via a
+    // DB sequence when omitted (UI never sends a code).
+    dakoCode: z.string().min(1).max(32).optional(),
     name: z.string().min(1).max(200),
     address: z.string().min(1).max(500),
     dateEstablished: dateStr,
@@ -174,3 +178,36 @@ export const eligibilityCheckSchema = z
 
 export type ScheduleGenerateInput = z.infer<typeof scheduleGenerateSchema>;
 export type EligibilityCheckPayload = z.infer<typeof eligibilityCheckSchema>;
+
+// ---------------------------------------------------------------------------
+// Phase 6 — assignment clear / replacement workflows
+// ---------------------------------------------------------------------------
+
+/** §36 — Change-of-Suguan and Teacher-Absent are SEPARATE events. */
+export const clearTypeSchema = z.enum(["CHANGE_OF_SUGUAN", "TEACHER_ABSENT"]);
+
+/** §3 — required reason for every clear; §5 — preset/custom absence reason. */
+export const clearAssignmentSchema = z
+  .object({
+    clearType: clearTypeSchema,
+    reason: z.string().trim().min(1, "reason is required").max(500),
+    absentReason: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.clearType === "TEACHER_ABSENT" && !v.absentReason?.trim()) {
+      ctx.addIssue({ code: "custom", message: "absentReason is required when clearType is TEACHER_ABSENT" });
+    }
+  });
+
+/** §8-§12 — modify: absent reason + confirmed replacement in one atomic op. */
+export const replaceAssignmentSchema = z
+  .object({
+    absentReason: z.string().trim().min(1, "absence reason is required").max(500),
+    replacementTeacherId: z.string().uuid(),
+    overrideReason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+export type ClearAssignmentInput = z.infer<typeof clearAssignmentSchema>;
+export type ReplaceAssignmentInput = z.infer<typeof replaceAssignmentSchema>;

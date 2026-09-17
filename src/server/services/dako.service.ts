@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
+
 import { getDb, withTransaction, type Database } from "@/server/db/client";
 import { dako } from "@/server/db/schema";
 import { dakoCreateSchema, dakoUpdateSchema, type DakoCreateInput } from "@/lib/validation/schemas";
@@ -14,8 +15,16 @@ export async function createDako(
 ): Promise<typeof dako.$inferSelect> {
   dakoCreateSchema.parse(input);
   return withTransaction(async (tx) => {
+    // Phase 6 §23-§24: concurrency-safe auto code when omitted (UI never sends
+    // one). nextval runs INSIDE the transaction — two simultaneous creates can
+    // never collide; gaps from rollbacks are permanent (no reuse).
+    let code = input.dakoCode;
+    if (!code) {
+      const n = await tx.execute(sql`select nextval('pnk_dako_code_seq') as nextval`);
+      code = `ILGD-${n[0]!.nextval}`;
+    }
     try {
-      const inserted = await tx.insert(dako).values(input).returning();
+      const inserted = await tx.insert(dako).values({ ...input, dakoCode: code }).returning();
       const row = inserted[0]!;
       await audit(
         { user: actor, action: "CREATED_DAKO", entityType: "dako", entityId: row.id, newValue: row },

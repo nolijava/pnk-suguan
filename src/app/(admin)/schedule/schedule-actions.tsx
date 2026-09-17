@@ -300,7 +300,8 @@ export function ScheduleActions({
                   ) : (
                     sectionRows.map((r, i) => (
                       <tr key={`${r.dakoCode}|${r.assignmentType}|${i}`} className={r.occupiedByManual ? "row-manual" : ""}>
-                        <td>{r.dakoName} <span className="info-note">({r.dakoCode})</span></td>
+                        {/* Phase 6 §1 — Dako Code hidden from schedule display; name only. */}
+                        <td>{r.dakoName}</td>
                         {r.teacherName ? (
                           <td>{r.teacherName} <span className="info-note">({r.teacherCode})</span></td>
                         ) : (

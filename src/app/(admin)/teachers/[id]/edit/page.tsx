@@ -30,7 +30,7 @@ export default async function EditTeacherPage({
       await TeacherService.updateTeacher(
         id,
         {
-          teacherCode: get("teacherCode"),
+          // Phase 6 §20 — teacherCode omitted: immutable system-assigned code.
           firstName: get("firstName"),
           middleName: get("middleName") || undefined,
           lastName: get("lastName"),
@@ -61,7 +61,8 @@ export default async function EditTeacherPage({
       {error ? <Notice kind="error">{error}</Notice> : null}
       <form action={saveAction} className="card form-col">
         <div className="form-grid">
-          <FormField label="Teacher Code" name="teacherCode" required defaultValue={t.teacherCode} />
+          {/* Phase 6 §20 — Teacher Code is immutable; keep it visible read-only. */}
+          <p className="info-note form-span">Teacher Code: <strong>{t.teacherCode}</strong> (system-assigned, immutable)</p>
           <FormField label="First Name" name="firstName" required defaultValue={t.firstName} />
           <FormField label="Middle Name" name="middleName" defaultValue={t.middleName} />
           <FormField label="Last Name" name="lastName" required defaultValue={t.lastName} />

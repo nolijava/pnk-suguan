@@ -27,7 +27,8 @@ export default async function NewDakoPage({
       const get = (k: string) => String(formData.get(k) ?? "").trim();
       await DakoService.createDako(
         {
-          dakoCode: get("dakoCode"),
+          // Phase 6 §23 — dakoCode omitted: server auto-generates from the
+          // concurrency-safe sequence (ILGD-###).
           name: get("name"),
           address: get("address"),
           dateEstablished: get("dateEstablished"),
@@ -55,7 +56,8 @@ export default async function NewDakoPage({
       {error ? <Notice kind="error">{error}</Notice> : null}
       <form action={action} className="card form-col">
         <div className="form-grid">
-          <FormField label="Dako Code" name="dakoCode" required />
+          {/* Phase 6 §23 — Dako Code is auto-generated (ILGD-###, concurrency-safe); not user-editable. */}
+          <p className="info-note form-span">Dako Code is assigned automatically (next ILGD-###) when the dako is created.</p>
           <FormField label="Dako Name" name="name" required />
           <FormField label="Address" name="address" required />
           <FormField label="Date Established" name="dateEstablished" type="date" required />

@@ -8,6 +8,7 @@ import { buildAnnualSchedule } from "@/lib/annual";
 import { isoWeek } from "@/lib/iso-week";
 import { StatusBadge } from "./_components/status-badge";
 import { AnnualTables } from "./annual-client";
+import { GenerateSuguanButton } from "./generate-button";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,9 @@ export default async function DashboardPage({
   const year = flat.year !== undefined ? Number(flat.year) : cur.year;
   const rows = await AssignmentService.listAssignmentsForYear(year);
   const schedule = buildAnnualSchedule(rows, year);
+  // Phase 6 §6/§7/§13/§14 — persisted absence/modification provenance for cell
+  // tooltips (batched; viewing stays read-only).
+  const cellInfo = await AssignmentService.getAnnualCellInfo(year);
 
   // Current-week summary — real counts from persisted data; read-only view
   // never creates the week row (§20).
@@ -79,6 +83,12 @@ export default async function DashboardPage({
   const canGenerate = user.roleCodes.includes("ADMIN") || user.roleCodes.includes("SCHEDULER");
   const currentWeekKey = schedule.year === cur.year ? `W${cur.week}` : null;
 
+  // Phase 6 §27 — mutations are server-guarded; the writable flag only decides
+  // whether cells are interactive in the UI (Server can clear/modify, Admin
+  // additionally override). Every action still passes requirePermission + the
+  // assertWeekMutable lifecycle gate server-side.
+  const writable = canGenerate;
+
   return (
     <>
       <div className="page-header">
@@ -86,6 +96,12 @@ export default async function DashboardPage({
           <h1>PNK Suguan Dashboard</h1>
           <p>Annual Suguan schedule — SUGO, RESERBA, and RESERBA II for the selected year.</p>
         </div>
+        {canGenerate ? (
+          <div>
+            {/* §16-§19 — new entry point into the EXISTING Phase 4 workflow. */}
+            <GenerateSuguanButton currentYear={cur.year} currentWeek={cur.week} />
+          </div>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
@@ -99,6 +115,8 @@ export default async function DashboardPage({
         schedule={schedule}
         currentWeekKey={currentWeekKey}
         currentIsoLabel={`W${cur.week} · ${cur.year}`}
+        cellInfo={cellInfo}
+        writable={writable}
       />
 
       {summary ? (

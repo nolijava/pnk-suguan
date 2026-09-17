@@ -12,6 +12,7 @@ export type AnnualTypeCode = (typeof ANNUAL_TYPES)[number];
 
 /** One flat row from the batched year query (AssignmentService.listAssignmentsForYear). */
 export interface AnnualAssignmentRow {
+  id: string;
   weekNumber: number;
   dakoId: string;
   dakoCode: string;
@@ -26,6 +27,8 @@ export interface AnnualAssignmentRow {
 }
 
 export interface AnnualCell {
+  /** Assignment row id — null when the slot is empty (or fully cleared). */
+  id: string | null;
   teacherName: string | null;
   teacherCode: string | null;
   source: string | null;
@@ -94,12 +97,13 @@ export function buildAnnualSchedule(rows: AnnualAssignmentRow[], year: number): 
         const hit = assigned.get(cellKey(dakoId, i + 1, type));
         return hit
           ? {
+              id: hit.id,
               teacherName: hit.teacherName,
               teacherCode: hit.teacherCode,
               source: hit.assignmentSource,
               status: hit.status,
             }
-          : { teacherName: null, teacherCode: null, source: null, status: null };
+          : { id: null, teacherName: null, teacherCode: null, source: null, status: null };
       }),
     })),
   });

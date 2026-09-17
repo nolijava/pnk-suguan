@@ -34,7 +34,7 @@ export default async function EditDakoPage({
       await DakoService.updateDako(
         id,
         {
-          dakoCode: get("dakoCode"),
+          // Phase 6 §23 — dakoCode omitted: immutable system-assigned code.
           name: get("name"),
           address: get("address"),
           dateEstablished: get("dateEstablished") || undefined,
@@ -65,7 +65,8 @@ export default async function EditDakoPage({
       {error ? <Notice kind="error">{error}</Notice> : null}
       <form action={saveAction} className="card form-col">
         <div className="form-grid">
-          <FormField label="Dako Code" name="dakoCode" required defaultValue={d.dakoCode} />
+          {/* Phase 6 §23 — Dako Code is immutable; keep it visible read-only. */}
+          <p className="info-note form-span">Dako Code: <strong>{d.dakoCode}</strong> (system-assigned, immutable)</p>
           <FormField label="Dako Name" name="name" required defaultValue={d.name} />
           <FormField label="Address" name="address" required defaultValue={d.address} />
           <FormField label="Date Established" name="dateEstablished" type="date" defaultValue={d.dateEstablished} />

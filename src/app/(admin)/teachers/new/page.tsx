@@ -24,7 +24,8 @@ export default async function NewTeacherPage({
       const get = (k: string) => String(formData.get(k) ?? "").trim();
       const teacher = await TeacherService.createTeacher(
         {
-          teacherCode: get("teacherCode"),
+          // Phase 6 §20 — teacherCode omitted: server auto-generates from the
+          // concurrency-safe sequence (PNK-G-####).
           firstName: get("firstName"),
           middleName: get("middleName") || undefined,
           lastName: get("lastName"),
@@ -54,7 +55,8 @@ export default async function NewTeacherPage({
       {error ? <Notice kind="error">{error}</Notice> : null}
       <form action={action} className="card form-col">
         <div className="form-grid">
-          <FormField label="Teacher Code" name="teacherCode" required />
+          {/* Phase 6 §20 — Teacher Code is auto-generated (PNK-G-####, concurrency-safe); not user-editable. */}
+          <p className="info-note form-span">Teacher Code is assigned automatically (next PNK-G-####) when the teacher is created.</p>
           <FormField label="First Name" name="firstName" required />
           <FormField label="Middle Name" name="middleName" />
           <FormField label="Last Name" name="lastName" required />

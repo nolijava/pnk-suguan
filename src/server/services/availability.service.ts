@@ -216,7 +216,8 @@ export async function upsertAvailability(
  * master-INACTIVE guard, PUBLISHED lock (ADMIN correction), ABSENT-reason
  * requirement, one-row-per-teacher×week, no-op skip, per-change audit.
  */
-async function applyAvailabilityUpsert(
+/** Exported for Phase 6 assignment-clear/replace workflows (same tx only). */
+export async function applyAvailabilityUpsert(
   tx: Database,
   input: AvailabilityUpsertInput,
   actor: SessionUser,
