@@ -117,29 +117,40 @@ describe("assignment service (§19-§24)", () => {
     const engDako = await DakoService.createDako({ dakoCode: "DA-E", name: "English Dako", address: "2 Ave", dateEstablished: "2005-05-05", worshipDay: "SUNDAY", worshipTime: "10:00", language: "ENGLISH" }, admin);
     const filDako = await DakoService.createDako({ dakoCode: "DA-F", name: "Fil Dako", address: "3 Ave", dateEstablished: "2005-05-05", worshipDay: "SUNDAY", worshipTime: "09:00", language: "FILIPINO" }, admin);
     const week = await WeekService.getOrCreateWeek(2088, 30);
+    const other = await TeacherService.createTeacher({ teacherCode: "TA-E", firstName: "Eng", lastName: "Speak", language: "ENGLISH" }, admin);
 
-    // FILIPINO teacher → ENGLISH dako: blocked without override
+    // FILIPINO teacher → ENGLISH dako: blocked (Scheduler)
     await expect(
       AssignmentService.createAssignment({ weekId: week.id, dakoId: engDako.id, teacherId: filTeacher.id, assignmentType: "SUGO" }, sched),
     ).rejects.toThrow(/cannot serve/);
 
-    // ADMIN override is allowed and recorded
-    const res = await AssignmentService.createAssignment(
-      { weekId: week.id, dakoId: engDako.id, teacherId: filTeacher.id, assignmentType: "SUGO", overrideReason: "shortage of english speakers" },
-      admin,
-    );
-    expect(res.override).toBe(true);
-    expect(res.assignment.assignmentSource).toBe("OVERRIDE");
+    // Phase 5 — ADMIN override is ALSO rejected: LANGUAGE_MISMATCH is
+    // non-overrideable through every path, reason or not.
+    await expect(
+      AssignmentService.createAssignment(
+        { weekId: week.id, dakoId: engDako.id, teacherId: filTeacher.id, assignmentType: "SUGO", overrideReason: "shortage of english speakers" },
+        admin,
+      ),
+    ).rejects.toThrow(/not overridable/);
 
-    // One per teacher per week
+    // ENGLISH teacher → ENGLISH dako succeeds (row used for history below)
+    const res = await AssignmentService.createAssignment(
+      { weekId: week.id, dakoId: engDako.id, teacherId: other.id, assignmentType: "SUGO" },
+      sched,
+    );
+    expect(res.override).toBe(false);
+    expect(res.assignment.assignmentSource).toBe("MANUAL");
+
+    // One per teacher per week (filTeacher takes the filDako SUGO slot first)
+    await AssignmentService.createAssignment({ weekId: week.id, dakoId: filDako.id, teacherId: filTeacher.id, assignmentType: "SUGO" }, sched);
     await expect(
       AssignmentService.createAssignment({ weekId: week.id, dakoId: filDako.id, teacherId: filTeacher.id, assignmentType: "RESERBA" }, sched),
     ).rejects.toThrow(/already has an assignment/);
 
     // Duplicate slot blocked
-    const other = await TeacherService.createTeacher({ teacherCode: "TA-E", firstName: "Eng", lastName: "Speak", language: "ENGLISH" }, admin);
+    const engTeacher2 = await TeacherService.createTeacher({ teacherCode: "TA-E2", firstName: "Eng", lastName: "Two", language: "ENGLISH" }, admin);
     await expect(
-      AssignmentService.createAssignment({ weekId: week.id, dakoId: engDako.id, teacherId: other.id, assignmentType: "SUGO" }, sched),
+      AssignmentService.createAssignment({ weekId: week.id, dakoId: engDako.id, teacherId: engTeacher2.id, assignmentType: "SUGO" }, sched),
     ).rejects.toThrow(/already filled/);
 
     // Week immutability: finalize then attempt change
@@ -152,8 +163,8 @@ describe("assignment service (§19-§24)", () => {
     await expect(WeekService.setWeekStatus(week.id, { status: "DRAFT" }, sched)).rejects.toThrow(/ADMIN/);
     await WeekService.setWeekStatus(week.id, { status: "DRAFT", reason: "correction needed" }, admin);
 
-    // Change assignment writes history (§25)
-    await AssignmentService.changeAssignment(res.assignment.id, { teacherId: other.id, reason: "reassignment" }, admin);
+    // Change assignment writes history (§25) — ENGLISH → ENGLISH stays valid
+    await AssignmentService.changeAssignment(res.assignment.id, { teacherId: engTeacher2.id, reason: "reassignment" }, admin);
     const hist = await AssignmentService.getAssignmentHistory(res.assignment.id);
     expect(hist.length).toBeGreaterThanOrEqual(2);
   });

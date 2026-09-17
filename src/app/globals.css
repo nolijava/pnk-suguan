@@ -100,3 +100,22 @@ form.card, .card { background: var(--surface); border: 1px solid var(--border); 
 .row-manual td { background: rgba(29, 78, 216, 0.04); }
 .avail-editor select, .avail-editor input { font-size: 13px; padding: 4px 8px; }
 
+/* Phase 5 — annual dashboard + weekly Suguan sections */
+.annual-year-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 14px; }
+.annual-block { margin-bottom: 22px; }
+.annual-block h2 { margin: 0 0 6px; }
+.annual-scroll { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
+.annual-scroll:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.annual-table { min-width: max-content; }
+.annual-table th, .annual-table td { padding: 6px 10px; font-size: 13px; }
+.annual-table .dako-col { position: sticky; left: 0; z-index: 2; background: var(--surface); min-width: 190px; max-width: 260px; white-space: normal; }
+.annual-table thead th { position: sticky; top: 0; z-index: 1; }
+.annual-table thead .dako-col { z-index: 3; background: #eef1f5; }
+.annual-table tbody tr:hover .dako-col { background: #f8fafc; }
+.annual-table .current-week { background: #fff7cc; box-shadow: inset 0 0 0 1px #f5c518; }
+.annual-table thead .current-week { background: #ffefad; }
+.summary-table td, .summary-table th { border: none; padding: 4px 12px 4px 0; white-space: normal; }
+.dashboard-current-week, .dashboard-quick { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin: 16px 0; }
+.sched-section { margin: 20px 0; }
+.sched-section > h2 { margin: 0 0 8px; }
+

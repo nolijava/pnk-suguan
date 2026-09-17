@@ -14,3 +14,21 @@ export function isTeacherEligibleForDako(
   if (dakoLanguage === "FILIPINO") return true;
   return teacherLanguage === "ENGLISH";
 }
+
+/**
+ * Phase 5 — hard rules that NO assignment path may override, not even ADMIN
+ * (create / change / ADMIN override / API / future paths).
+ *
+ *  - DAKO_DISABLED was already documented as structural in Phase 4
+ *    (`overrideAllowed: false`); the gate below closes the latent gap that
+ *    let an ADMIN override reason bypass it on the create path.
+ *  - LANGUAGE_MISMATCH is now an ABSOLUTE business rule (Phase 5 §14):
+ *    an ENGLISH dako accepts ENGLISH teachers only. FILIPINO teacher →
+ *    ENGLISH dako is never allowed; the only path to eligibility is editing
+ *    the teacher's language to ENGLISH in their Phase 2 profile.
+ */
+export const NON_OVERRIDEABLE_RULES = ["DAKO_DISABLED", "LANGUAGE_MISMATCH"] as const;
+
+export function isNonOverrideableRule(rule: string): boolean {
+  return (NON_OVERRIDEABLE_RULES as readonly string[]).includes(rule);
+}

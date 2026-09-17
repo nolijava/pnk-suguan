@@ -114,11 +114,21 @@ Server-side Suguan generation for DRAFT weeks only. Hard eligibility (never bypa
 | GET | `/api/scheduling/previous-week-absences?weekId=` | assignments.read | Freshly computed (never cached) count of teachers ABSENT in the immediately preceding week — powers the pre-generation warning |
 | POST | `/api/scheduling/eligibility-check` | assignments.write | `{ weekId, dakoId, teacherId }` → `{ eligible, violatedRules[], overrideAllowed }` — powers the manual-override warning flow |
 
-**Manual overrides (§15):** rule-conforming assignment create/change uses `assignments.write`; a change whose PROPOSED state violates a hard rule is rejected for Scheduler/Encoder and permitted only for ADMIN with a mandatory non-empty reason, stored with `assignmentSource=OVERRIDE` and audited `MANUAL_ASSIGNMENT_OVERRIDE` (reason prefixed `[RULES: …]`). `DAKO_DISABLED` and already-assigned teachers have no override path. Overrides never touch teacher/dako master status, availability, or Current Destination.
+**Manual overrides (§15, tightened in Phase 5):** rule-conforming assignment create/change uses `assignments.write`; a change whose PROPOSED state violates a hard rule is rejected for Scheduler/Encoder and permitted only for ADMIN with a mandatory non-empty reason, stored with `assignmentSource=OVERRIDE` and audited `MANUAL_ASSIGNMENT_OVERRIDE` (reason prefixed `[RULES: …]`). **`NON_OVERRIDEABLE_RULES = ["DAKO_DISABLED", "LANGUAGE_MISMATCH"]`** have no override path for ANY actor — an ENGLISH dako accepts ENGLISH teachers only (Filipino teacher → English dako is rejected even for ADMIN; the only path to eligibility is changing the teacher's language to ENGLISH in their Phase 2 profile), and already-assigned teachers remain structural. Overrides never touch teacher/dako master status, availability, or Current Destination.
 
 **Audit actions:** `GENERATED_SCHEDULE` · `REGENERATED_SCHEDULE` (full previous-AUTO snapshot) · `MANUAL_ASSIGNMENT_OVERRIDE` · existing `CREATED_ASSIGNMENT`/`CHANGED_ASSIGNMENT`/finalize/publish entries.
 
 **Migration 0003 (user-approved):** `assignment_history` deletion is permitted only inside a regeneration transaction via the transaction-local GUC `pnk.regeneration_cascade` (set with `is_local => true`; vanishes on commit/rollback). History UPDATE guard and both `audit_logs` guards remain absolutely append-only.
+
+## Dashboard & annual schedule (Phase 5)
+
+The Home Dashboard (`/`) is the application entry point: the **Annual Suguan Schedule** is the primary content — THREE separate vertically stacked tables (**SUGO → RESERBA → RESERBA II**), rows = dakos (a DISABLED dako stays visible only for weeks with historical assignments, badged DISABLED), columns = real ISO weeks via `isoWeeksInYear` (52/53-safe), cells = assigned teacher name (+ `MANUAL`/`OVERRIDE` text badge; `—` = unassigned). Current-ISO-week column is highlighted across all three tables only when the selected year is the current ISO year. The three tables share synchronized horizontal scrolling with a sticky Dako column.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/schedule/annual?year=` | assignments.read | Batched annual schedule for one ISO year — single join (`assignments ⋈ weeks ⋈ dako ⋈ teachers`), shaped into the three tables server-side; strictly read-only (viewing never creates weeks/rows) |
+
+The weekly schedule page renders the same data as three separate per-type sections and reuses the Phase 4 flows unchanged (generate + absence warning, DRAFT-only regenerate with MANUAL/OVERRIDE preservation + audit snapshot, finalize/publish, PUBLISHED permanently read-only).
 
 ## UI pages (server-rendered admin)
 
@@ -132,7 +142,8 @@ Server-side Suguan generation for DRAFT weeks only. Hard eligibility (never bypa
 | `/dako/new`, `/dako/[id]/edit` | dako.write | Forms; anniversary computed note |
 | `/dako/[id]` | dako.read | Details: computed anniversary (years/next/date/days), status + disable info, audit excerpt |
 | `/availability` | availability.read | Phase 3 weekly encoding: ISO week nav (prev/next/current + year/week jump, 52/53-safe), effective-status filters incl. NOT_ENCODED, inline status/reason grid, batched save with unsaved-change count, Fill Blanks confirm dialog, master-inactive rows locked with explanation, PUBLISHED lock banner + ADMIN correction flow |
-| `/schedule` | assignments.read | Phase 4 weekly schedule: ISO week nav, slot table (teacher/source/status + unassigned reason codes), Generate/Regenerate with the pre-generation absence warning (Proceed · Review/Modify Availability First · Cancel), Finalize/Publish, ADMIN override dialog with violated-rule display + mandatory reason, PUBLISHED fully read-only |
+| `/` | assignments.read | Phase 5 Home Dashboard: year nav (‹ ›, Today, current-ISO-week indicator), Annual Suguan Schedule FIRST as three stacked Dako × ISO-week tables (SUGO → RESERBA → RESERBA II; synced horizontal scroll, sticky Dako column, current-week highlight, DISABLED badge on historical disabled-dako rows), then real-count Current Week summary + quick links |
+| `/schedule` | assignments.read | Phase 5 weekly Suguan management (Phase 4 flows unchanged): ISO week nav, THREE separate sections SUGO/RESERBA/RESERBA II (teacher/source/status + unassigned reason codes + candidate stats), Generate/Regenerate with the pre-generation absence warning (Proceed · Review/Modify Availability First · Cancel), Finalize/Publish, override dialog showing violated rules — LANGUAGE_MISMATCH/DAKO_DISABLED rendered as NOT overridable — PUBLISHED fully read-only |
 | `/audit-logs` | audit.read | Audit viewer |
 
 ## Error codes

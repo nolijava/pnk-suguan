@@ -3,7 +3,7 @@
  * Hard rules are never bypassed by the automatic engine and never scored
  * around; manual ADMIN override is handled at the assignment-service layer.
  */
-import { isTeacherEligibleForDako, type Language } from "@/lib/eligibility";
+import { isTeacherEligibleForDako, isNonOverrideableRule, type Language } from "@/lib/eligibility";
 import type {
   CandidateTeacher,
   HardRuleCode,
@@ -54,8 +54,10 @@ export function eligibilityCheck(
   ctx: SchedulingContext,
 ): EligibilityCheckResult {
   const { eligible, violatedRules } = evaluateCandidate(teacher, dako, ctx);
-  // DAKO_DISABLED is structural: even ADMIN override is refused (createAssignment
-  // refuses non-ACTIVE dako outright; matching the automatic rule).
-  const overrideAllowed = !violatedRules.includes("DAKO_DISABLED");
+  // Phase 5 — NON_OVERRIDEABLE_RULES (DAKO_DISABLED, LANGUAGE_MISMATCH) are
+  // structural/absolute: even ADMIN override is refused by the assignment
+  // services, so the UI must never offer one. LANGUAGE_MISMATCH on an ENGLISH
+  // dako is fixed only by changing the teacher's profile language.
+  const overrideAllowed = !violatedRules.some((r) => isNonOverrideableRule(r));
   return { eligible, violatedRules, overrideAllowed };
 }

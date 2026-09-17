@@ -113,6 +113,27 @@ the same components.
 9. **Scheduling deferred** — `/api/scheduling/generate` returns 501; no algorithm code
    exists (§43), but the counting model (`v_assignment_counts`, `assignments_counting_idx`)
    and scheduler queries are ready (§35).
+10. **Language is absolute (Phase 5)** — `NON_OVERRIDEABLE_RULES = ["DAKO_DISABLED",
+    "LANGUAGE_MISMATCH"]` reject assignment create/change/override for EVERY actor,
+    ADMIN included; an ENGLISH dako accepts ENGLISH teachers only, and the sole path to
+    eligibility is editing the teacher's language in their Phase 2 profile (tested).
+11. **Annual tables read-only + batched (Phase 5)** — the dashboard and annual API use
+    ONE joined query per year (`listAssignmentsForYear`); viewing never creates weeks or
+    assignments; historical assignments on DISABLED dakos stay visible, badged DISABLED.
+
+## Phase 5 — Weekly Suguan Management UI + Home Dashboard
+
+The dashboard lives at `/` (`src/app/(admin)/page.tsx`; the old redirect-only root was
+removed). Content hierarchy: year selector → **Annual Suguan Schedule as three separate
+vertically stacked tables (SUGO → RESERBA → RESERBA II)** — never one merged matrix —
+then the real-count Current Week summary and quick links. The pure table builder
+(`src/lib/annual.ts`) shapes one batched join into the three grids; the client component
+(`annual-client.tsx`) synchronizes horizontal `scrollLeft` across the three containers,
+keeps the Dako column sticky, and highlights the current ISO week column only when the
+selected year is the current ISO year. `/schedule` renders the same week data as three
+per-type sections and delegates every mutation to the unchanged Phase 4 services; the
+override dialog mirrors `NON_OVERRIDEABLE_RULES` (language/disabled shown as not
+overridable) while the server remains authoritative.
 
 ## Security posture
 

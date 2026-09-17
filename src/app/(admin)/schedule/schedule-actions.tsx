@@ -36,6 +36,9 @@ const TYPE_LABEL: Record<string, string> = {
   RESERBA_II: "RESERBA II",
 };
 
+/** Mirror of NON_OVERRIDEABLE_RULES (src/lib/eligibility.ts) for UX only — the server is authoritative. */
+const NON_OVERRIDEABLE: readonly string[] = ["DAKO_DISABLED", "LANGUAGE_MISMATCH"];
+
 /**
  * §6 pre-generation warning flow: Generate → fresh server count (already
  * rendered server-side into absenceCount; re-fetched at click time so it is
@@ -274,51 +277,58 @@ export function ScheduleActions({
         </p>
       ) : null}
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Dako</th>
-              <th>Type</th>
-              <th>Teacher</th>
-              <th>Source</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={6}>No slots computed for this week.</td></tr>
-            ) : (
-              rows.map((r, i) => (
-                <tr key={`${r.dakoCode}|${r.assignmentType}|${i}`} className={r.occupiedByManual ? "row-manual" : ""}>
-                  <td>{r.dakoName} <span className="info-note">({r.dakoCode})</span></td>
-                  <td>{TYPE_LABEL[r.assignmentType] ?? r.assignmentType}</td>
-                  {r.teacherName ? (
-                    <td>{r.teacherName} <span className="info-note">({r.teacherCode})</span></td>
+      {/* §9 — THREE SEPARATE sections: SUGO / RESERBA / RESERBA II. Never one merged table. */}
+      {["SUGO", "RESERBA", "RESERBA_II"].map((type) => {
+        const sectionRows = rows.filter((r) => r.assignmentType === type);
+        return (
+          <section key={type} className="sched-section">
+            <h2>{TYPE_LABEL[type] ?? type}</h2>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Dako</th>
+                    <th>Teacher</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sectionRows.length === 0 ? (
+                    <tr><td colSpan={5}>No {TYPE_LABEL[type] ?? type} slots for this week.</td></tr>
                   ) : (
-                    <td>
-                      <span className="badge badge-gray">UNASSIGNED</span>
-                      {r.reasonCode ? (
-                        <div className="info-note">
-                          {r.reasonCode}: {r.reason}
-                        </div>
-                      ) : null}
-                    </td>
+                    sectionRows.map((r, i) => (
+                      <tr key={`${r.dakoCode}|${r.assignmentType}|${i}`} className={r.occupiedByManual ? "row-manual" : ""}>
+                        <td>{r.dakoName} <span className="info-note">({r.dakoCode})</span></td>
+                        {r.teacherName ? (
+                          <td>{r.teacherName} <span className="info-note">({r.teacherCode})</span></td>
+                        ) : (
+                          <td>
+                            <span className="badge badge-gray">UNASSIGNED</span>
+                            {r.reasonCode ? (
+                              <div className="info-note">
+                                {r.reasonCode}: {r.reason}
+                              </div>
+                            ) : null}
+                          </td>
+                        )}
+                        <td>{r.source ? <span className="badge badge-gray">{r.source}</span> : <span className="info-note">—</span>}</td>
+                        <td>{r.status ? <StatusBadge status={r.status} /> : <span className="info-note">—</span>}</td>
+                        <td>
+                          {canWrite && !locked && r.id ? (
+                            <button type="button" className="btn btn-secondary" onClick={() => openOverride(r)}>Override…</button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))
                   )}
-                  <td>{r.source ? <span className="badge badge-gray">{r.source}</span> : <span className="info-note">—</span>}</td>
-                  <td>{r.status ? <StatusBadge status={r.status} /> : <span className="info-note">—</span>}</td>
-                  <td>
-                    {canWrite && !locked && r.id ? (
-                      <button type="button" className="btn btn-secondary" onClick={() => openOverride(r)}>Override…</button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
 
       {showAbsentWarning ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Previous Week Availability Notice">
@@ -371,6 +381,22 @@ export function ScheduleActions({
               {overrideRules !== null ? (
                 overrideRules.length === 0 ? (
                   <p className="notice">Rule check passed — no hard rules violated.</p>
+                ) : overrideRules.some((r) => NON_OVERRIDEABLE.includes(r)) ? (
+                  <div className="error" role="alert">
+                    <strong>
+                      Cannot be overridden: {overrideRules.filter((r) => NON_OVERRIDEABLE.includes(r)).join(", ")}
+                    </strong>
+                    {overrideRules.some((r) => !NON_OVERRIDEABLE.includes(r)) ? (
+                      <div className="info-note">
+                        Other violated rules ({overrideRules.filter((r) => !NON_OVERRIDEABLE.includes(r)).join(", ")}) would be
+                        ADMIN-overrideable, but this assignment is blocked outright by the rule(s) above.
+                      </div>
+                    ) : null}
+                    <div className="info-note">
+                      LANGUAGE_MISMATCH on an English dako is absolute — the only path to eligibility is changing the
+                      teacher&apos;s language to ENGLISH in their profile. A DISABLED dako cannot receive assignments.
+                    </div>
+                  </div>
                 ) : (
                   <div className="error" role="alert">
                     <strong>This override violates: {overrideRules.join(", ")}</strong>
@@ -384,7 +410,7 @@ export function ScheduleActions({
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setOverride(null)} disabled={pending}>Cancel</button>
                 <button type="button" className="btn btn-secondary" onClick={checkOverrideRules} disabled={pending}>Check rules</button>
-                {overrideRules !== null ? (
+                {overrideRules !== null && !overrideRules.some((r) => NON_OVERRIDEABLE.includes(r)) ? (
                   <button type="button" className="btn btn-primary" onClick={applyOverride} disabled={pending}>
                     {overrideRules.length > 0 ? "Apply override anyway" : "Apply"}
                   </button>

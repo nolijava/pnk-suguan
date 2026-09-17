@@ -298,7 +298,8 @@ describe("scheduling engine", () => {
     const r = await SchedulingService.checkEligibility({ weekId: w.id, dakoId: dEng.id, teacherId: t.id });
     expect(r.eligible).toBe(false);
     expect(r.violatedRules).toContain("LANGUAGE_MISMATCH");
-    expect(r.overrideAllowed).toBe(true);
+    // Phase 5 — LANGUAGE_MISMATCH is NON-overrideable (clarified business rule).
+    expect(r.overrideAllowed).toBe(false);
   });
 
   // ---------------------------------------------------------- concurrency

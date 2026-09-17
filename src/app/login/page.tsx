@@ -10,7 +10,7 @@ export default async function LoginPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await currentUserOrNull();
-  if (user) redirect(user.mustChangePassword ? "/change-password" : "/teachers");
+  if (user) redirect(user.mustChangePassword ? "/change-password" : "/");
   const sp = await searchParams;
   const error = typeof sp.error === "string" ? sp.error : undefined;
 
@@ -28,7 +28,7 @@ export default async function LoginPage({
         path: "/",
         expires: result.expiresAt,
       });
-      redirect(result.mustChangePassword ? "/change-password" : "/teachers");
+      redirect(result.mustChangePassword ? "/change-password" : "/");
     } catch (e) {
       if (e instanceof Error && e.message === "NEXT_REDIRECT") throw e;
       redirect(`/login?error=${encodeURIComponent(e instanceof Error ? e.message : "login failed")}`);

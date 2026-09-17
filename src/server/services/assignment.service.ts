@@ -9,7 +9,7 @@ import {
   weeks,
 } from "@/server/db/schema";
 import { assignmentCreateSchema, type AssignmentCreateInput } from "@/lib/validation/schemas";
-import { isTeacherEligibleForDako, type Language } from "@/lib/eligibility";
+import { isTeacherEligibleForDako, isNonOverrideableRule, type Language } from "@/lib/eligibility";
 import { ForbiddenError, ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
 import { audit } from "./audit.service";
 import { assertWeekMutable } from "./week.service";
@@ -56,12 +56,20 @@ export async function createAssignment(
 
     if (!isOverride) {
       if (t.status !== "ACTIVE") throw new ConflictError(`teacher is ${t.status}`);
-      if (d.status !== "ACTIVE") throw new ConflictError(`dako is ${d.status}`);
-      if (!isTeacherEligibleForDako(t.language as Language, d.language as Language)) {
-        throw new ConflictError(
-          `FILIPINO teacher cannot serve ENGLISH dako (use override with reason if intended)`,
-        );
-      }
+    }
+
+    // Phase 5 — NON-overrideable hard rules: rejected for EVERY actor, with or
+    // without an override reason (§14: English dako accepts English teachers
+    // only; the sole path to eligibility is editing the teacher profile).
+    // DAKO_DISABLED was already documented as structural — the gate closes the
+    // latent create-path gap. Everything else keeps the ADMIN-override flow.
+    if (d.status !== "ACTIVE") {
+      throw new ConflictError(`dako is ${d.status}`);
+    }
+    if (!isTeacherEligibleForDako(t.language as Language, d.language as Language)) {
+      throw new ConflictError(
+        `FILIPINO teacher cannot serve ENGLISH dako — not overridable (change the teacher's language to ENGLISH in their profile)`,
+      );
     }
 
     // Duplicate slot check (friendly error before hitting the unique index).
@@ -172,6 +180,8 @@ async function violatedRulesFor(
 
   // Already-assigned is a structural constraint, not an eligibility rule:
   // the unique indexes reject it for everyone (no override path).
+  // NOTE: DAKO_DISABLED + LANGUAGE_MISMATCH here are NON-overrideable
+  // (see NON_OVERRIDEABLE_RULES) — callers must reject them outright.
   const dup = await tx
     .select({ id: assignments.id })
     .from(assignments)
@@ -199,6 +209,14 @@ export async function changeAssignment(
     let violated: string[] = [];
     if (input.teacherId) {
       violated = await violatedRulesFor(tx, before.weekId, before.dakoId, input.teacherId, id);
+      // Phase 5 — non-overrideable rules (e.g. LANGUAGE_MISMATCH) reject
+      // EVERY actor, ADMIN included; no reason can bypass them.
+      const structural = violated.filter(isNonOverrideableRule);
+      if (structural.length > 0) {
+        throw new ConflictError(
+          `assignment change violates non-overrideable rule(s): ${structural.join(", ")} — cannot be overridden (fix master data, e.g. teacher language)`,
+        );
+      }
       if (violated.length > 0 && !canOverride(actor)) {
         throw new ForbiddenError(
           `assignment change violates hard rule(s): ${violated.join(", ")} — override requires an administrator with a reason`,
@@ -275,6 +293,37 @@ export async function getAssignment(id: string) {
   const rows = await getDb().select().from(assignments).where(eq(assignments.id, id)).limit(1);
   if (rows.length === 0) throw new NotFoundError("assignment not found");
   return rows[0];
+}
+
+/**
+ * Phase 5 — batched annual schedule query (§20/§21): EVERY assignment in an
+ * ISO year in ONE join, no per-week/per-cell requests. Read-only — viewing the
+ * annual tables never creates weeks or rows. Disabled dakos remain visible
+ * for weeks where they hold historical assignments (§6).
+ */
+export async function listAssignmentsForYear(year: number) {
+  return getDb()
+    .select({
+      id: assignments.id,
+      weekId: assignments.weekId,
+      weekNumber: weeks.isoWeekNumber,
+      dakoId: assignments.dakoId,
+      dakoCode: dako.dakoCode,
+      dakoName: dako.name,
+      dakoStatus: dako.status,
+      assignmentType: assignments.assignmentType,
+      assignmentSource: assignments.assignmentSource,
+      status: assignments.status,
+      teacherId: assignments.teacherId,
+      teacherCode: teachers.teacherCode,
+      teacherName: sql<string>`trim(concat(${teachers.firstName}, ' ', coalesce(${teachers.middleName}, ''), ' ', ${teachers.lastName}))`,
+    })
+    .from(assignments)
+    .innerJoin(weeks, eq(weeks.id, assignments.weekId))
+    .innerJoin(dako, eq(dako.id, assignments.dakoId))
+    .innerJoin(teachers, eq(teachers.id, assignments.teacherId))
+    .where(eq(weeks.year, year))
+    .orderBy(weeks.isoWeekNumber, dako.dakoCode, assignments.assignmentType);
 }
 
 export async function listAssignmentsForWeek(weekId: string) {
