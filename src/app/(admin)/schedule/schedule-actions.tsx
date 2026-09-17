@@ -29,6 +29,8 @@ export interface ScheduleActionsProps {
   canPublish: boolean;
   /** Phase 7 — operator-only print-ready PDF of the physical Suguan form. */
   canPdf: boolean;
+  /** Master plan §24 — SUPER_ADMIN-only emergency unlock entry point. */
+  isSuperAdmin: boolean;
   absenceCount: number;
   rows: SlotRow[];
   summary: { dakos: number; sugoAssigned: number; reserbaAssigned: number; reserbaIiAssigned: number; unassigned: number } | null;
@@ -98,6 +100,7 @@ export function ScheduleActions({
   canFinalize,
   canPublish,
   canPdf,
+  isSuperAdmin,
   absenceCount,
   rows,
   summary,
@@ -145,6 +148,85 @@ export function ScheduleActions({
   }, [weekId, weekStatus]);
 
   const editable = canWrite && (!locked || correctionActive);
+
+  // ------------------------------------------------------------------
+  // §24 SUPER_ADMIN Emergency Correction dialog state. The unlock secret
+  // exists only in the POST body — never in URLs, logs, or localStorage.
+  // ------------------------------------------------------------------
+  const [showEmergency, setShowEmergency] = useState(false);
+  const [emergencyMode, setEmergencyMode] = useState<"begin" | "end">("begin");
+  const [emergencySecret, setEmergencySecret] = useState("");
+  const [emergencyReason, setEmergencyReason] = useState("");
+  const [emergencyErr, setEmergencyErr] = useState<string | null>(null);
+
+  function openEmergencyDialog() {
+    setMessage(null);
+    setEmergencySecret("");
+    setEmergencyReason("");
+    setEmergencyErr(null);
+    setShowEmergency(true);
+    // Fresh, non-cached state decides begin vs end (window may have expired).
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/weeks/${weekId}/correction`);
+        const body = await res.json();
+        setEmergencyMode(body?.data?.active ? "end" : "begin");
+      } catch {
+        setEmergencyMode("begin");
+      }
+    });
+  }
+
+  function closeEmergencyDialog() {
+    setShowEmergency(false);
+    setEmergencySecret("");
+    setEmergencyReason("");
+    setEmergencyErr(null);
+  }
+
+  function submitEmergency() {
+    setEmergencyErr(null);
+    if (emergencyMode === "begin" && !emergencySecret.trim()) {
+      setEmergencyErr("Unlock secret is required.");
+      return;
+    }
+    if (emergencyMode === "begin" && !emergencyReason.trim()) {
+      setEmergencyErr("Reason is required and audited.");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/weeks/${weekId}/correction`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(
+            emergencyMode === "begin"
+              ? { mode: "PUBLISHED", action: "begin", secret: emergencySecret.trim(), reason: emergencyReason.trim() }
+              : { mode: "PUBLISHED", action: "end" },
+          ),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          setEmergencyErr(body?.error?.message ?? "unlock failed");
+          setEmergencySecret(""); // never re-display or retain the secret
+          return;
+        }
+        setShowEmergency(false);
+        setEmergencySecret("");
+        setEmergencyReason("");
+        setCorrectionActive(emergencyMode === "begin");
+        setMessage({
+          kind: "success",
+          text:
+            emergencyMode === "begin"
+              ? "PUBLISHED unlock granted — a 30-minute audited correction window is now active. The week remains PUBLISHED."
+              : "Correction window ended — the week is re-locked (still PUBLISHED).",
+        });
+      } catch {
+        setEmergencyErr("network error — unlock not executed");
+      }
+    });
+  }
 
   async function refreshAbsenceCount(): Promise<number> {
     const res = await fetch(`/api/scheduling/previous-week-absences?weekId=${weekId}`);
@@ -424,6 +506,12 @@ export function ScheduleActions({
           {canPublish && weekStatus === "FINALIZED" ? (
             <button type="button" className="btn btn-secondary" onClick={publish} disabled={pending}>Publish</button>
           ) : null}
+          {isSuperAdmin && weekStatus === "PUBLISHED" ? (
+            /* §24 — the only UI entry point for a PUBLISHED unlock. */
+            <button type="button" className="btn btn-secondary" onClick={openEmergencyDialog} disabled={pending}>
+              Emergency Correction…
+            </button>
+          ) : null}
           {canPdf ? (
             /* Phase 7 — read-only physical-form PDF for the selected week;
                opens in a new tab for native print/save. Server enforces RBAC. */
@@ -513,6 +601,64 @@ export function ScheduleActions({
           </section>
         );
       })}
+
+      {/* §24 — SUPER_ADMIN emergency unlock. Begin: role + server-verified
+          secret + mandatory audited reason. End: re-locks immediately. The
+          secret lives only in the POST body and is cleared from state after
+          every attempt (success or failure). */}
+      {showEmergency ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Emergency Schedule Correction">
+          <div className="modal">
+            <h2>Emergency Schedule Correction</h2>
+            {emergencyMode === "begin" ? (
+              <>
+                <p>
+                  Unlock the <strong>PUBLISHED</strong> schedule of Week {weekNumber} · {weekYear} for an authorized
+                  emergency correction.
+                </p>
+                <p className="info-note">
+                  The week remains <strong>PUBLISHED</strong> — no status change, no unlock of other weeks. The window
+                  closes after 30 minutes or when ended explicitly. Every change inside the window is audited, and
+                  rules that no override can bypass (e.g. Filipino teacher → English dako) stay impossible.
+                </p>
+                <label>
+                  Unlock secret
+                  <input
+                    type="password"
+                    value={emergencySecret}
+                    onChange={(e) => setEmergencySecret(e.target.value)}
+                    autoComplete="off"
+                    disabled={pending}
+                  />
+                </label>
+                <label>
+                  Reason (required, audited)
+                  <textarea rows={3} value={emergencyReason} onChange={(e) => setEmergencyReason(e.target.value)} disabled={pending} />
+                </label>
+              </>
+            ) : (
+              <>
+                <p>
+                  End the active correction window for Week {weekNumber} · {weekYear}?
+                </p>
+                <p className="info-note">
+                  Assignments become read-only again immediately. The week stays <strong>PUBLISHED</strong>; ending is
+                  audited.
+                </p>
+              </>
+            )}
+            {emergencyErr ? <p className="error">{emergencyErr}</p> : null}
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={closeEmergencyDialog} disabled={pending}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-primary" onClick={submitEmergency} disabled={pending}>
+                {emergencyMode === "begin" ? "Unlock with Secret" : "End Correction Window"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showAbsentWarning ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Previous Week Availability Notice">

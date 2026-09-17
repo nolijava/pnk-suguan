@@ -59,6 +59,9 @@ export default async function SchedulePage({
   // Phase 7 — same permission gates the PDF endpoint server-side.
   const canPdf = canWrite;
   const canPublish = hasPerm(user.roleCodes, "weeks.publish");
+  // §24 — the PUBLISHED emergency unlock is a SUPER_ADMIN-only entry point;
+  // the endpoint re-checks the role and the secret server-side.
+  const isSuperAdmin = user.roleCodes.includes("SUPER_ADMIN");
 
   // Week navigation via ISO arithmetic (same as availability page).
   const prevStart = new Date(`${week.startDate}T00:00:00Z`);
@@ -162,6 +165,7 @@ export default async function SchedulePage({
         canFinalize={canFinalize}
         canPublish={canPublish}
         canPdf={canPdf}
+        isSuperAdmin={isSuperAdmin}
         absenceCount={absenceCount.count}
         rows={rows}
         summary={summary}

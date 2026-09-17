@@ -175,6 +175,9 @@ describe("correction architecture — FINALIZED correction, SUPER_ADMIN PUBLISHE
     });
     await beginFinalizedCorrection(week.id, "fix again", admin);
     process.env.PNK_SCHEDULE_CORRECTION_TTL_MS = "0";
+    // TTL=0 sets expiresAt == startedAt; let the clock advance past that
+    // millisecond so the expiry check (`<`, not `<=`) is deterministic.
+    await new Promise((resolve) => setTimeout(resolve, 3));
     expect(await isScheduleCorrectionActive(week.id)).toBe(false); // expired
     delete process.env.PNK_SCHEDULE_CORRECTION_TTL_MS;
     process.env.PNK_SCHEDULE_CORRECTION_TTL_MS = "1800000";
