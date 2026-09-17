@@ -67,11 +67,14 @@ export default async function SchedulePage({
   const next = isoWeek(nextStart);
 
   // Merge DB rows (what is actually assigned) with the engine plan (what would be).
+  // Dedupe at SLOT level (dako × type): the plan omits slots occupied by
+  // MANUAL/OVERRIDE rows (regeneration preserves them), so those rows must
+  // still appear — a dako-level "covered" check would drop them entirely.
   const rows: SlotRow[] = [];
   const byKey = new Map(assignments.map((a) => [`${a.dakoId}|${a.assignmentType}`, a]));
-  const byId = new Map(assignments.map((a) => [a.id, a]));
-  const coveredDakos = new Set(assignments.map((a) => a.dakoId));
+  const seenSlots = new Set<string>();
   for (const s of plan?.slots ?? []) {
+    seenSlots.add(`${s.dakoId}|${s.assignmentType}`);
     const existing = byKey.get(`${s.dakoId}|${s.assignmentType}`);
     rows.push({
       id: existing?.id ?? null,
@@ -88,9 +91,11 @@ export default async function SchedulePage({
       occupiedByManual: existing ? existing.assignmentSource !== "AUTO" : false,
     });
   }
-  // MANUAL/OVERRIDE rows for dakos the plan doesn't cover (e.g. disabled dako slots).
+  // Assignment rows whose slot the plan doesn't include: MANUAL/OVERRIDE
+  // (plan omits their slots) and any rows on dakos the plan doesn't cover
+  // (e.g. disabled dako slots).
   for (const a of assignments) {
-    if (!coveredDakos.has(a.dakoId)) {
+    if (!seenSlots.has(`${a.dakoId}|${a.assignmentType}`)) {
       rows.push({
         id: a.id,
         dakoId: a.dakoId,

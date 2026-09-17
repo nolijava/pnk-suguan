@@ -316,7 +316,7 @@ export function ScheduleActions({
                         <td>{r.source ? <span className="badge badge-gray">{r.source}</span> : <span className="info-note">—</span>}</td>
                         <td>{r.status ? <StatusBadge status={r.status} /> : <span className="info-note">—</span>}</td>
                         <td>
-                          {canWrite && !locked && r.id ? (
+                          {canWrite && !locked ? (
                             <button type="button" className="btn btn-secondary" onClick={() => openOverride(r)}>Override…</button>
                           ) : null}
                         </td>
