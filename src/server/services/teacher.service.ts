@@ -282,21 +282,24 @@ export async function changeCurrentDestination(
       }
     }
 
+    // Master plan E-3 — the destination-history transition rides the SAME
+    // transaction: set/change creates the new period; clear closes the
+    // teacher's active period (records preserved — never deleted).
+    // NOTE: this MUST run BEFORE teachers.current_destination_id is updated —
+    // assignDestination re-reads the row and treats "already equals target"
+    // as a same-destination no-op.
+    if (newDestinationId) {
+      await assignDestination(teacherId, newDestinationId, actor, { tx });
+    } else {
+      await closeActiveDestination(teacherId, tx);
+    }
+
     const updated = await tx
       .update(teachers)
       .set({ currentDestinationId: newDestinationId })
       .where(eq(teachers.id, teacherId))
       .returning();
     const row = updated[0]!;
-
-    // Master plan E-3 — the destination-history transition rides the SAME
-    // transaction: set/change creates the new period; clear closes the
-    // teacher's active period (records preserved — never deleted).
-    if (newDestinationId) {
-      await assignDestination(teacherId, newDestinationId, actor, { tx });
-    } else {
-      await closeActiveDestination(teacherId, tx);
-    }
 
     await audit(
       {

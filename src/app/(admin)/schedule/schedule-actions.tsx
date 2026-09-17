@@ -125,6 +125,27 @@ export function ScheduleActions({
   const isAdmin = canFinalize && canPublish; // finalize+publish ⇒ ADMIN
   const locked = weekStatus !== "DRAFT";
 
+  // §23 — FINALIZED stays correctable through the authorized correction
+  // workflow: when an active correction grant is held for this week, cell
+  // actions light up (server re-validates via assertScheduleCorrectable).
+  // Generation stays DRAFT-only regardless.
+  const [correctionActive, setCorrectionActive] = useState(false);
+  useEffect(() => {
+    if (weekStatus === "DRAFT") return;
+    let alive = true;
+    fetch(`/api/weeks/${weekId}/correction`)
+      .then((r) => r.json())
+      .then((b) => {
+        if (alive && b?.data?.active) setCorrectionActive(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [weekId, weekStatus]);
+
+  const editable = canWrite && (!locked || correctionActive);
+
   async function refreshAbsenceCount(): Promise<number> {
     const res = await fetch(`/api/scheduling/previous-week-absences?weekId=${weekId}`);
     const body = await res.json();
@@ -387,10 +408,10 @@ export function ScheduleActions({
           {absenceCount > 0 ? ` · ${absenceCount} teacher(s) ABSENT last week (hard-excluded from generation).` : ""}
         </div>
         <div className="actions-row">
-          {canWrite && !locked ? (
-            <button type="button" className="btn btn-secondary" onClick={openUnavailable} disabled={pending}>
-              View Unavailable Teachers
-            </button>
+          {editable ? (
+              <button type="button" className="btn btn-secondary" onClick={openUnavailable} disabled={pending}>
+                View Unavailable Teachers
+              </button>
           ) : null}
           {canGenerate && !locked ? (
             <button type="button" className="btn btn-primary" onClick={onGenerateClick} disabled={pending}>
@@ -419,11 +440,15 @@ export function ScheduleActions({
       </div>
 
       {message ? <p className={message.kind === "success" ? "notice" : "error"}>{message.text}</p> : null}
-      {locked ? (
+      {locked || correctionActive ? (
         <p className="info-note">
           {weekStatus === "PUBLISHED"
-            ? "PUBLISHED — this schedule is immutable. Corrections require the authorized correction workflow."
-            : "FINALIZED — generation is locked; authorized corrections may still be applied."}
+            ? correctionActive
+              ? "PUBLISHED — SUPER_ADMIN correction window active; changes are audited. The week remains PUBLISHED."
+              : "PUBLISHED — this schedule is immutable. Corrections require the authorized correction workflow."
+            : correctionActive
+              ? "FINALIZED — authorized correction window active; changes are audited. Generation stays locked."
+              : "FINALIZED — generation is locked; authorized corrections may still be applied."}
         </p>
       ) : null}
 
@@ -467,7 +492,7 @@ export function ScheduleActions({
                         <td>{r.source ? <span className="badge badge-gray">{r.source}</span> : <span className="info-note">—</span>}</td>
                         <td>{r.status ? <StatusBadge status={r.status} /> : <span className="info-note">—</span>}</td>
                         <td>
-                          {canWrite && !locked ? (
+                          {editable ? (
                             r.id ? (
                               <button type="button" className="btn btn-secondary" onClick={() => openSlotDialog(r, "override")}>
                                 Override…

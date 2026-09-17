@@ -19,10 +19,10 @@ import { scheduleCorrectionSchema } from "@/lib/validation/query-schemas";
  * The secret is accepted only in the request body — never in URLs, never
  * logged, never returned.
  */
-export async function POST(req: Request, ctx: { params: Promise<{ weekId: string }> }) {
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const user = await requirePermission("assignments.write");
-    const { weekId } = await ctx.params;
+    const { id: weekId } = await ctx.params;
     const body = scheduleCorrectionSchema.parse(await parseBody<unknown>(req));
     if (body.mode === "FINALIZED") {
       if (body.action === "begin") {
@@ -45,10 +45,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ weekId: string
 }
 
 /** GET — correction-window state for the UI banner. */
-export async function GET(_req: Request, ctx: { params: Promise<{ weekId: string }> }) {
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     await requirePermission("assignments.read");
-    const { weekId } = await ctx.params;
+    const { id: weekId } = await ctx.params;
     return ok({ weekId, ...(await getScheduleCorrectionState(weekId)) });
   } catch (err) {
     return fail(err);
