@@ -126,9 +126,15 @@ form.card, .card { background: var(--surface); border: 1px solid var(--border); 
 .cell-btn:hover { border-color: var(--primary, #2563eb); }
 .cell-static { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; position: relative; }
 .cell-btn .cell-info, .cell-static .cell-info {
-  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 320px;
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0;
+  /* §7 — constrained width, natural word wrap; long words/strings may break.
+     Never overflows horizontally nor widens the annual table (absolute
+     positioning keeps it out of the table's column layout). */
+  width: min(400px, 78vw); max-width: min(400px, 78vw);
+  white-space: normal; overflow-wrap: anywhere; word-break: normal; hyphens: none;
+  box-sizing: border-box; overflow: hidden;
   background: var(--surface); color: var(--text); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 8px 10px; font-size: 0.78rem; line-height: 1.45;
+  border-radius: var(--radius); padding: 10px 12px; font-size: 0.78rem; line-height: 1.55;
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.14); visibility: hidden; opacity: 0; transition: opacity 0.1s; }
 .cell-btn:hover .cell-info, .cell-btn:focus-visible .cell-info, .cell-btn:focus .cell-info,
 .cell-static:hover .cell-info, .cell-static:focus .cell-info, .cell-static:focus-within .cell-info {
