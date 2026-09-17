@@ -51,10 +51,16 @@ const VIEWER: Permission[] = [
   "notifications.read", "reports.read",
 ];
 
+// SUPER_ADMIN is authorized for the exceptional PUBLISHED Suguan unlock
+// mechanism; all other capabilities remain governed by the RBAC permission
+// model (identical to ADMIN).
+const SUPER_ADMIN: Permission[] = [...ADMIN];
+
 export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
   ADMIN,
   SCHEDULER,
   VIEWER,
+  SUPER_ADMIN,
 };
 
 export function permissionsForRoles(roleCodes: readonly string[]): Permission[] {

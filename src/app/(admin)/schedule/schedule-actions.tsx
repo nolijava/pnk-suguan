@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { StatusBadge } from "../_components/status-badge";
 
 export interface SlotRow {
@@ -20,6 +20,8 @@ export interface SlotRow {
 
 export interface ScheduleActionsProps {
   weekId: string;
+  weekYear: number;
+  weekNumber: number;
   weekStatus: "DRAFT" | "FINALIZED" | "PUBLISHED";
   canWrite: boolean;
   canGenerate: boolean;
@@ -27,8 +29,6 @@ export interface ScheduleActionsProps {
   canPublish: boolean;
   /** Phase 7 — operator-only print-ready PDF of the physical Suguan form. */
   canPdf: boolean;
-  pdfYear: number;
-  pdfWeek: number;
   absenceCount: number;
   rows: SlotRow[];
   summary: { dakos: number; sugoAssigned: number; reserbaAssigned: number; reserbaIiAssigned: number; unassigned: number } | null;
@@ -40,26 +40,64 @@ const TYPE_LABEL: Record<string, string> = {
   RESERBA_II: "RESERBA II",
 };
 
-/** Mirror of NON_OVERRIDEABLE_RULES (src/lib/eligibility.ts) for UX only — the server is authoritative. */
+/** Human-readable violated-rule text (§22 informational; server is authoritative). */
+const RULE_LABEL: Record<string, string> = {
+  TEACHER_INACTIVE_MASTER: "Teacher is INACTIVE (master data)",
+  DAKO_DISABLED: "Dako is DISABLED",
+  WEEKLY_ABSENT: "Absent this week",
+  WEEKLY_INACTIVE: "Weekly availability INACTIVE",
+  NOT_ENCODED: "Availability not encoded",
+  PREVIOUS_WEEK_ABSENT: "Absent last week (hard automatic exclusion)",
+  ALREADY_ASSIGNED_THIS_WEEK: "Already assigned this week",
+  LANGUAGE_MISMATCH: "Language mismatch — never overridable",
+};
+
+/** Mirror of NON_OVERRIDEABLE_RULES (src/lib/eligibility.ts) for UX only. */
 const NON_OVERRIDEABLE: readonly string[] = ["DAKO_DISABLED", "LANGUAGE_MISMATCH"];
 
+interface CandidateTeacher {
+  teacherId: string;
+  teacherCode: string;
+  fullName: string;
+  language: string;
+}
+interface UnavailableTeacher extends CandidateTeacher {
+  violatedRules: string[];
+  overrideAllowed: boolean;
+}
+interface SlotCandidates {
+  slot: { dakoId: string; assignmentType: string };
+  eligible: CandidateTeacher[];
+  unavailable: UnavailableTeacher[];
+}
+
 /**
- * §6 pre-generation warning flow: Generate → fresh server count (already
- * rendered server-side into absenceCount; re-fetched at click time so it is
- * never cached) → confirm dialog when N > 0 → POST /api/scheduling/generate.
- * Override flow (§15): eligibility-check first, display violated rules,
- * mandatory reason, POST/PATCH assignment endpoints.
+ * §6 pre-generation warning flow: Generate → fresh server absence count →
+ * confirm dialog when N > 0 → POST /api/scheduling/generate.
+ *
+ * §19 Delegate (empty slot): eligible-only selector, no reason, confirmation
+ * shows Week/Dako/Type/Teacher/Source, POST → assignment_source=MANUAL.
+ *
+ * §20 Override (existing assignment): eligible-only selector + mandatory
+ * audited reason, confirmation shows current+replacement+reason, PATCH.
+ *
+ * §21 ADMIN exception mode (separate explicit toggle, normal dropdown stays
+ * eligible-only): unavailable candidates listed WITH their violated rule;
+ * non-overrideable rules are refused outright even here. The server
+ * re-validates everything — the UI never grants the bypass.
+ *
+ * §22 View Unavailable Teachers: informational panel, selection disabled.
  */
 export function ScheduleActions({
   weekId,
+  weekYear,
+  weekNumber,
   weekStatus,
   canWrite,
   canGenerate,
   canFinalize,
   canPublish,
   canPdf,
-  pdfYear,
-  pdfWeek,
   absenceCount,
   rows,
   summary,
@@ -68,14 +106,24 @@ export function ScheduleActions({
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [showAbsentWarning, setShowAbsentWarning] = useState(false);
   const [freshCount, setFreshCount] = useState(0);
-  const [override, setOverride] = useState<{ row: SlotRow } | null>(null);
-  const [overrideRules, setOverrideRules] = useState<string[] | null>(null);
-  const [overrideReason, setOverrideReason] = useState("");
-  const [replacementCode, setReplacementCode] = useState("");
-  const [overrideErr, setOverrideErr] = useState<string | null>(null);
 
-  const locked = weekStatus !== "DRAFT";
+  // Shared slot-assignment dialog state (§19/§20/§21).
+  const [slot, setSlot] = useState<{ row: SlotRow; mode: "delegate" | "override" } | null>(null);
+  const [candidates, setCandidates] = useState<SlotCandidates | null>(null);
+  const [candidatesErr, setCandidatesErr] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [exceptionMode, setExceptionMode] = useState(false); // ADMIN-only explicit opt-in
+  const [review, setReview] = useState(false);
+  const [reason, setReason] = useState("");
+  const [slotErr, setSlotErr] = useState<string | null>(null);
+
+  const [showUnavailable, setShowUnavailable] = useState(false);
+  const [unavailable, setUnavailable] = useState<UnavailableTeacher[] | null>(null);
+  const [unavailableErr, setUnavailableErr] = useState<string | null>(null);
+
   const isAdmin = canFinalize && canPublish; // finalize+publish ⇒ ADMIN
+  const locked = weekStatus !== "DRAFT";
 
   async function refreshAbsenceCount(): Promise<number> {
     const res = await fetch(`/api/scheduling/previous-week-absences?weekId=${weekId}`);
@@ -151,103 +199,181 @@ export function ScheduleActions({
     });
   }
 
-  async function runEligibilityCheck(teacherId: string, dakoId: string): Promise<string[]> {
-    const res = await fetch("/api/scheduling/eligibility-check", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ weekId, dakoId, teacherId }),
-    });
-    const body = await res.json();
-    return res.ok ? body.data.violatedRules : [];
-  }
-  void runEligibilityCheck;
+  // -------------------------------------------------------------------------
+  // §19/§20/§21 slot dialogs
+  // -------------------------------------------------------------------------
 
-  function openOverride(row: SlotRow) {
-    setOverride({ row });
-    setOverrideRules(null);
-    setOverrideReason("");
-    setReplacementCode(row.teacherCode ?? "");
-    setOverrideErr(null);
-  }
-
-  /** Step 1: resolve teacher + run the server eligibility check; show violated rules. */
-  function checkOverrideRules() {
-    if (!override) return;
-    if (!overrideReason.trim()) {
-      setOverrideErr("A non-empty reason is required for an override.");
-      return;
-    }
-    if (!replacementCode.trim()) {
-      setOverrideErr("Replacement teacher code is required.");
-      return;
-    }
-    setMessage(null);
-    startTransition(async () => {
-      try {
-        const lookup = await fetch(`/api/teachers?q=${encodeURIComponent(replacementCode.trim())}&pageSize=5`);
-        const lbody = await lookup.json();
-        const hit = lbody?.data?.rows?.find(
-          (r: { teacherCode: string }) => r.teacherCode.toUpperCase() === replacementCode.trim().toUpperCase(),
-        );
-        if (!hit) {
-          setOverrideErr(`No teacher found with code ${replacementCode.trim()}.`);
-          return;
-        }
-        const violated: string[] = await runEligibilityCheck(hit.id, override.row.dakoId);
-        setOverrideRules(violated);
-        setOverrideErr(null);
-      } catch {
-        setOverrideErr("network error — rule check failed");
+  const fetchCandidates = useCallback(
+    async (row: SlotRow, mode: "delegate" | "override"): Promise<SlotCandidates | null> => {
+      const params = new URLSearchParams({
+        weekId,
+        dakoId: row.dakoId,
+        assignmentType: row.assignmentType,
+      });
+      if (mode === "override" && row.id) params.set("assignmentId", row.id);
+      const res = await fetch(`/api/scheduling/slot-candidates?${params.toString()}`);
+      const body = await res.json();
+      if (!res.ok) {
+        setCandidatesErr(body?.error?.message ?? "failed to load eligible teachers");
+        return null;
       }
+      return body.data as SlotCandidates;
+    },
+    [weekId],
+  );
+
+  function openSlotDialog(row: SlotRow, mode: "delegate" | "override") {
+    setSlot({ row, mode });
+    setCandidates(null);
+    setCandidatesErr(null);
+    setSearch("");
+    setSelectedId(null);
+    setExceptionMode(false);
+    setReview(false);
+    setReason("");
+    setSlotErr(null);
+    startTransition(async () => {
+      const data = await fetchCandidates(row, mode);
+      if (data) setCandidates(data);
     });
   }
 
-  /** Step 2: explicit confirm — server re-validates and rejects any bypass attempt. */
-  function applyOverride() {
-    if (!override) return;
-    if (!overrideReason.trim()) {
-      setOverrideErr("A non-empty reason is required for an override.");
+  function closeSlotDialog() {
+    setSlot(null);
+    setCandidates(null);
+    setReview(false);
+  }
+
+  const selectedTeacher = useMemo(() => {
+    if (!candidates || !selectedId) return null;
+    return (
+      candidates.eligible.find((t) => t.teacherId === selectedId) ??
+      candidates.unavailable.find((t) => t.teacherId === selectedId) ??
+      null
+    );
+  }, [candidates, selectedId]);
+
+  const selectedIsException = useMemo(() => {
+    if (!candidates || !selectedId) return false;
+    return !candidates.eligible.some((t) => t.teacherId === selectedId);
+  }, [candidates, selectedId]);
+
+  const filteredEligible = useMemo(() => {
+    if (!candidates) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return candidates.eligible;
+    return candidates.eligible.filter((t) => t.fullName.toLowerCase().includes(q));
+  }, [candidates, search]);
+
+  /** §21 — exception mode: refetch and expose the unavailable list with rules. */
+  function toggleExceptionMode() {
+    if (!slot) return;
+    const next = !exceptionMode;
+    setExceptionMode(next);
+    setSelectedId(null);
+    setReview(false);
+    setSlotErr(null);
+    if (next && candidates) return; // unavailable list already loaded
+    if (next) {
+      startTransition(async () => {
+        const data = await fetchCandidates(slot.row, slot.mode);
+        if (data) setCandidates(data);
+      });
+    }
+  }
+
+  function proceedToReview() {
+    if (!slot || !selectedTeacher) {
+      setSlotErr("Select a teacher first.");
+      return;
+    }
+    if (slot.mode === "override" && !reason.trim()) {
+      setSlotErr("A non-empty reason is required for an override.");
+      return;
+    }
+    if (selectedIsException && !exceptionMode) {
+      setSlotErr("This teacher is not eligible — enable exception mode to continue.");
+      return;
+    }
+    if (selectedIsException && !selectedTeacherViolatesNonOverrideable) {
+      // §21 — non-overrideable rules never reach here; other violations require
+      // the explicit exception acknowledgement (reason) before confirmation.
+    }
+    setSlotErr(null);
+    setReview(true);
+  }
+
+  const selectedTeacherViolatesNonOverrideable = useMemo(() => {
+    if (!selectedIsException || !selectedTeacher) return false;
+    const u = selectedTeacher as UnavailableTeacher;
+    return u.violatedRules.some((r) => NON_OVERRIDEABLE.includes(r));
+  }, [selectedIsException, selectedTeacher]);
+
+  function applySlot() {
+    if (!slot || !selectedTeacher) return;
+    if (slot.mode === "override" && !reason.trim()) {
+      setSlotErr("A non-empty reason is required for an override.");
       return;
     }
     setMessage(null);
     startTransition(async () => {
       try {
-        const lookup = await fetch(`/api/teachers?q=${encodeURIComponent(replacementCode.trim())}&pageSize=5`);
-        const lbody = await lookup.json();
-        const hit = lbody?.data?.rows?.find(
-          (r: { teacherCode: string }) => r.teacherCode.toUpperCase() === replacementCode.trim().toUpperCase(),
-        );
-        if (!hit) {
-          setOverrideErr(`No teacher found with code ${replacementCode.trim()}.`);
-          return;
-        }
-        const violated: string[] = await runEligibilityCheck(hit.id, override.row.dakoId);
-        const res = override.row.id
-          ? await fetch(`/api/assignments/${override.row.id}`, {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ teacherId: hit.id, reason: overrideReason.trim() }),
-            })
-          : await fetch("/api/assignments", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                weekId, dakoId: override.row.dakoId, teacherId: hit.id,
-                assignmentType: override.row.assignmentType,
-                overrideReason: overrideReason.trim() || undefined,
-              }),
-            });
+        const res =
+          slot.mode === "override" && slot.row.id
+            ? await fetch(`/api/assignments/${slot.row.id}`, {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ teacherId: selectedTeacher.teacherId, reason: reason.trim() }),
+              })
+            : await fetch("/api/assignments", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  weekId,
+                  dakoId: slot.row.dakoId,
+                  assignmentType: slot.row.assignmentType,
+                  teacherId: selectedTeacher.teacherId,
+                  // Delegate = MANUAL (no reason). ADMIN exception on an empty
+                  // slot carries the mandatory audited reason → OVERRIDE source.
+                  overrideReason: reason.trim() || undefined,
+                }),
+              });
         const body = await res.json();
         if (!res.ok) {
-          setOverrideErr(body?.error?.message ?? "override failed");
+          setSlotErr(body?.error?.message ?? "assignment failed");
+          setReview(false);
           return;
         }
-        setOverride(null);
-        setMessage({ kind: "success", text: "Override applied. Reloading…" });
+        closeSlotDialog();
+        setMessage({ kind: "success", text: "Assignment saved. Reloading…" });
         window.location.reload();
       } catch {
-        setOverrideErr("network error — override not applied");
+        setSlotErr("network error — assignment not saved");
+        setReview(false);
       }
+    });
+  }
+
+  // §22 — informational only.
+  function openUnavailable() {
+    setShowUnavailable(true);
+    setUnavailable(null);
+    setUnavailableErr(null);
+    const first = rows[0];
+    if (!first) {
+      setUnavailableErr("No slots available for this week.");
+      return;
+    }
+    startTransition(async () => {
+      const params = new URLSearchParams({
+        weekId,
+        dakoId: first.dakoId,
+        assignmentType: first.assignmentType,
+      });
+      const res = await fetch(`/api/scheduling/slot-candidates?${params.toString()}`);
+      const body = await res.json();
+      if (!res.ok) setUnavailableErr(body?.error?.message ?? "failed to load availability information");
+      else setUnavailable((body.data as SlotCandidates).unavailable);
     });
   }
 
@@ -261,6 +387,11 @@ export function ScheduleActions({
           {absenceCount > 0 ? ` · ${absenceCount} teacher(s) ABSENT last week (hard-excluded from generation).` : ""}
         </div>
         <div className="actions-row">
+          {canWrite && !locked ? (
+            <button type="button" className="btn btn-secondary" onClick={openUnavailable} disabled={pending}>
+              View Unavailable Teachers
+            </button>
+          ) : null}
           {canGenerate && !locked ? (
             <button type="button" className="btn btn-primary" onClick={onGenerateClick} disabled={pending}>
               {rows.some((r) => r.source === "AUTO") ? "Regenerate schedule" : "Generate schedule"}
@@ -277,7 +408,7 @@ export function ScheduleActions({
                opens in a new tab for native print/save. Server enforces RBAC. */
             <a
               className="btn btn-secondary"
-              href={`/api/schedule/weekly-suguan-pdf?year=${pdfYear}&week=${pdfWeek}`}
+              href={`/api/schedule/weekly-suguan-pdf?year=${weekYear}&week=${weekNumber}`}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -291,12 +422,12 @@ export function ScheduleActions({
       {locked ? (
         <p className="info-note">
           {weekStatus === "PUBLISHED"
-            ? "PUBLISHED — this schedule is permanently immutable."
-            : "FINALIZED — generation is locked; only publish or ADMIN DRAFT-unlock applies."}
+            ? "PUBLISHED — this schedule is immutable. Corrections require the authorized correction workflow."
+            : "FINALIZED — generation is locked; authorized corrections may still be applied."}
         </p>
       ) : null}
 
-      {/* §9 — THREE SEPARATE sections: SUGO / RESERBA / RESERBA II. Never one merged table. */}
+      {/* §31 — THREE SEPARATE sections: SUGO / RESERBA / RESERBA II. Never one merged table. */}
       {["SUGO", "RESERBA", "RESERBA_II"].map((type) => {
         const sectionRows = rows.filter((r) => r.assignmentType === type);
         return (
@@ -337,7 +468,15 @@ export function ScheduleActions({
                         <td>{r.status ? <StatusBadge status={r.status} /> : <span className="info-note">—</span>}</td>
                         <td>
                           {canWrite && !locked ? (
-                            <button type="button" className="btn btn-secondary" onClick={() => openOverride(r)}>Override…</button>
+                            r.id ? (
+                              <button type="button" className="btn btn-secondary" onClick={() => openSlotDialog(r, "override")}>
+                                Override…
+                              </button>
+                            ) : (
+                              <button type="button" className="btn btn-secondary" onClick={() => openSlotDialog(r, "delegate")}>
+                                Delegate…
+                              </button>
+                            )
                           ) : null}
                         </td>
                       </tr>
@@ -372,70 +511,225 @@ export function ScheduleActions({
         </div>
       ) : null}
 
-      {override ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manual assignment override">
+      {slot ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={slot.mode === "delegate" ? "Manual Assignment" : "Manual Assignment Override"}>
           <div className="modal">
-            <h2>Manual Assignment Override</h2>
+            <h2>{slot.mode === "delegate" ? "Manual Assignment" : "Manual Assignment Override"}</h2>
             <p>
-              Replacing the <strong>{override.row.assignmentType}</strong> slot of{" "}
-              <strong>{override.row.dakoName}</strong> (currently: {override.row.teacherName ?? "unassigned"}).
+              {slot.mode === "delegate" ? "Delegating" : "Overriding"} the <strong>{slot.row.assignmentType}</strong> slot of{" "}
+              <strong>{slot.row.dakoName}</strong>
+              {slot.mode === "override" && slot.row.teacherName ? (
+                <> (currently: {slot.row.teacherName})</>
+              ) : null}
+              .
             </p>
-            <p className="info-note">
-              Rules are checked server-side before you confirm. A non-empty reason is mandatory and audited.
-            </p>
-            {overrideErr ? <p className="error">{overrideErr}</p> : null}
-            <div className="form-col">
-              <label>
-                Replacement teacher (code)
-                <input
-                  type="text"
-                  value={replacementCode}
-                  onChange={(e) => { setReplacementCode(e.target.value); setOverrideRules(null); }}
-                  autoFocus
-                />
-              </label>
-              <label>
-                Reason (required, audited)
-                <textarea rows={3} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} />
-              </label>
-              {overrideRules !== null ? (
-                overrideRules.length === 0 ? (
-                  <p className="notice">Rule check passed — no hard rules violated.</p>
-                ) : overrideRules.some((r) => NON_OVERRIDEABLE.includes(r)) ? (
+
+            {!review ? (
+              <>
+                <p className="info-note">
+                  Eligible teachers only — computed server-side from the same rules the scheduling engine uses.
+                  {isAdmin ? " Exception mode (ADMIN) lists ineligible candidates with their violated rule." : ""}
+                </p>
+                {candidatesErr ? <p className="error">{candidatesErr}</p> : null}
+                {candidates ? (
+                  candidates.eligible.length === 0 ? (
+                    <p className="info-note">
+                      No eligible teachers for this slot.{" "}
+                      {isAdmin ? "Enable exception mode to review ineligible candidates." : "Generate or adjust availability first."}
+                    </p>
+                  ) : null
+                ) : null}
+
+                {isAdmin ? (
+                  <label className="exception-toggle">
+                    <input
+                      type="checkbox"
+                      checked={exceptionMode}
+                      onChange={toggleExceptionMode}
+                      disabled={pending}
+                    />
+                    {" "}Exception mode (ADMIN) — show ineligible teachers with their violated rule
+                  </label>
+                ) : null}
+
+                <label>
+                  Search teacher by name
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Type a name…"
+                    disabled={pending}
+                  />
+                </label>
+
+                <div className="candidate-list" role="radiogroup" aria-label="Replacement teacher">
+                  {candidates === null ? (
+                    <p className="info-note">Loading teachers…</p>
+                  ) : (
+                    <>
+                      {filteredEligible.map((t) => (
+                        <label key={t.teacherId} className={`candidate ${selectedId === t.teacherId ? "candidate-selected" : ""}`}>
+                          <input
+                            type="radio"
+                            name="replacement-teacher"
+                            value={t.teacherId}
+                            checked={selectedId === t.teacherId}
+                            onChange={() => { setSelectedId(t.teacherId); setReview(false); setSlotErr(null); }}
+                            disabled={pending}
+                          />
+                          <span>{t.fullName}</span>
+                          <span className="info-note">
+                            {t.language} · {t.teacherCode}
+                          </span>
+                        </label>
+                      ))}
+
+                      {exceptionMode
+                        ? candidates.unavailable
+                            .filter((t) => !search.trim() || t.fullName.toLowerCase().includes(search.trim().toLowerCase()))
+                            .map((t) => {
+                              const blocked = t.violatedRules.some((r) => NON_OVERRIDEABLE.includes(r));
+                              return (
+                                <label
+                                  key={t.teacherId}
+                                  className={`candidate candidate-exception ${blocked ? "candidate-blocked" : ""} ${selectedId === t.teacherId ? "candidate-selected" : ""}`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name="replacement-teacher"
+                                    value={t.teacherId}
+                                    checked={selectedId === t.teacherId}
+                                    onChange={() => {
+                                      if (blocked) return; // §21 — never selectable, even in exception mode
+                                      setSelectedId(t.teacherId);
+                                      setReview(false);
+                                      setSlotErr(null);
+                                    }}
+                                    disabled={pending || blocked}
+                                    aria-disabled={blocked}
+                                  />
+                                  <span>{t.fullName}</span>
+                                  <span className={blocked ? "error" : "info-note"}>
+                                    {blocked ? "NOT ALLOWABLE: " : ""}
+                                    {t.violatedRules.map((r) => RULE_LABEL[r] ?? r).join("; ")}
+                                  </span>
+                                </label>
+                              );
+                            })
+                        : null}
+                    </>
+                  )}
+                </div>
+
+                {selectedTeacher && selectedIsException ? (
                   <div className="error" role="alert">
                     <strong>
-                      Cannot be overridden: {overrideRules.filter((r) => NON_OVERRIDEABLE.includes(r)).join(", ")}
+                      {selectedTeacherViolatesNonOverrideable
+                        ? "Cannot be assigned: this candidate violates a rule that no override can bypass (LANGUAGE_MISMATCH on an English dako is fixed only by changing the teacher's profile language to ENGLISH; a DISABLED dako cannot receive assignments)."
+                        : `Exception candidate — violates: ${(selectedTeacher as UnavailableTeacher).violatedRules.map((r) => RULE_LABEL[r] ?? r).join(", ")}`}
                     </strong>
-                    {overrideRules.some((r) => !NON_OVERRIDEABLE.includes(r)) ? (
+                    {!selectedTeacherViolatesNonOverrideable ? (
                       <div className="info-note">
-                        Other violated rules ({overrideRules.filter((r) => !NON_OVERRIDEABLE.includes(r)).join(", ")}) would be
-                        ADMIN-overrideable, but this assignment is blocked outright by the rule(s) above.
+                        Continuing requires an administrator override reason and produces an OVERRIDE-source assignment.
+                        The server re-validates everything — teacher/dako master data, availability, and Current
+                        Destination are never modified.
                       </div>
                     ) : null}
-                    <div className="info-note">
-                      LANGUAGE_MISMATCH on an English dako is absolute — the only path to eligibility is changing the
-                      teacher&apos;s language to ENGLISH in their profile. A DISABLED dako cannot receive assignments.
-                    </div>
                   </div>
-                ) : (
-                  <div className="error" role="alert">
-                    <strong>This override violates: {overrideRules.join(", ")}</strong>
-                    <div className="info-note">
-                      ADMIN override intentionally bypasses these rules for this assignment only. Teacher/dako master data,
-                      availability, and Current Destination are never modified. The rules and your reason are audited.
-                    </div>
-                  </div>
-                )
-              ) : null}
-              <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setOverride(null)} disabled={pending}>Cancel</button>
-                <button type="button" className="btn btn-secondary" onClick={checkOverrideRules} disabled={pending}>Check rules</button>
-                {overrideRules !== null && !overrideRules.some((r) => NON_OVERRIDEABLE.includes(r)) ? (
-                  <button type="button" className="btn btn-primary" onClick={applyOverride} disabled={pending}>
-                    {overrideRules.length > 0 ? "Apply override anyway" : "Apply"}
-                  </button>
                 ) : null}
-              </div>
+
+                {slot.mode === "override" || exceptionMode ? (
+                  <label>
+                    Reason (required, audited)
+                    <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} disabled={pending} />
+                  </label>
+                ) : null}
+
+                {slotErr ? <p className="error">{slotErr}</p> : null}
+
+                <div className="modal-actions">
+                  <button type="button" className="btn btn-secondary" onClick={closeSlotDialog} disabled={pending}>Cancel</button>
+                  <button type="button" className="btn btn-primary" onClick={proceedToReview} disabled={pending || !candidates}>
+                    Review Changes
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3>Confirm {slot.mode === "delegate" ? "Assignment" : "Override"}</h3>
+                <table className="confirm-table">
+                  <tbody>
+                    <tr><th scope="row">Week</th><td>W{String(weekNumber).padStart(2, "0")} · {weekYear}</td></tr>
+                    <tr><th scope="row">Dako</th><td>{slot.row.dakoName}</td></tr>
+                    <tr><th scope="row">Suguan</th><td>{TYPE_LABEL[slot.row.assignmentType] ?? slot.row.assignmentType}</td></tr>
+                    {slot.mode === "override" && slot.row.teacherName ? (
+                      <tr><th scope="row">Current teacher</th><td>{slot.row.teacherName}</td></tr>
+                    ) : null}
+                    <tr><th scope="row">{slot.mode === "delegate" ? "Teacher" : "Replacement teacher"}</th><td>{selectedTeacher?.fullName}</td></tr>
+                    {selectedIsException ? (
+                      <tr>
+                        <th scope="row">Exception</th>
+                        <td className="error">
+                          {(selectedTeacher as UnavailableTeacher).violatedRules.map((r) => RULE_LABEL[r] ?? r).join(", ")}
+                        </td>
+                      </tr>
+                    ) : null}
+                    {slot.mode === "override" || (exceptionMode && selectedIsException) ? (
+                      <tr><th scope="row">Reason</th><td>{reason.trim()}</td></tr>
+                    ) : null}
+                    <tr>
+                      <th scope="row">Source</th>
+                      <td>{selectedIsException ? "OVERRIDE" : slot.mode === "delegate" ? "MANUAL" : "OVERRIDE"}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p className="info-note">
+                  Validated fresh server-side on confirm. Teacher/dako master data, availability, and Current
+                  Destination are never modified by this operation.
+                </p>
+                {slotErr ? <p className="error">{slotErr}</p> : null}
+                <div className="modal-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setReview(false)} disabled={pending}>Back</button>
+                  <button type="button" className="btn btn-secondary" onClick={closeSlotDialog} disabled={pending}>Cancel</button>
+                  <button type="button" className="btn btn-primary" onClick={applySlot} disabled={pending}>
+                    {slot.mode === "delegate" && !selectedIsException ? "Assign" : "Confirm Override"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {showUnavailable ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Unavailable teachers">
+          <div className="modal">
+            <h2>View Unavailable Teachers</h2>
+            <p className="info-note">
+              Informational only — these teachers cannot be selected for assignment this week.
+            </p>
+            {unavailableErr ? <p className="error">{unavailableErr}</p> : null}
+            {unavailable === null ? (
+              <p className="info-note">Loading…</p>
+            ) : unavailable.length === 0 ? (
+              <p className="notice">Every teacher is eligible this week.</p>
+            ) : (
+              <ul className="unavailable-list">
+                {unavailable.map((t) => (
+                  <li key={t.teacherId}>
+                    <strong>{t.fullName}</strong>
+                    <span className="info-note">
+                      {" "}— {t.violatedRules.map((r) => RULE_LABEL[r] ?? r).join("; ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowUnavailable(false)} disabled={pending}>
+                Close
+              </button>
             </div>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { teachers, dako } from "@/server/db/schema";
 import { teacherCreateSchema, teacherUpdateSchema, type TeacherCreateInput } from "@/lib/validation/schemas";
 import { ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
 import { audit, type AuditEntry } from "./audit.service";
+import { assignDestination, closeActiveDestination } from "./destination-history.service";
 import type { SessionUser } from "@/server/auth/session";
 import { calculateAge, elapsedSince } from "@/lib/anniversary";
 
@@ -32,6 +33,11 @@ export async function createTeacher(
       }
       const inserted = await tx.insert(teachers).values({ ...input, teacherCode }).returning();
       const row = inserted[0]!;
+      // E-3: a teacher created WITH a destination starts their first real
+      // destination-history period at creation (today) — no dates invented.
+      if (input.currentDestinationId) {
+        await assignDestination(row.id, input.currentDestinationId, actor, { tx });
+      }
       await audit(
         { user: actor, action: "CREATED_TEACHER", entityType: "teacher", entityId: row.id, newValue: row },
         tx as Database,
@@ -53,6 +59,7 @@ export async function updateTeacher(
   return withTransaction(async (tx) => {
     const before = await tx.select().from(teachers).where(eq(teachers.id, id)).limit(1);
     if (before.length === 0) throw new NotFoundError("teacher not found");
+    const prior = before[0]!;
     if (patch.currentDestinationId) {
       const dest = await tx.select().from(dako).where(eq(dako.id, patch.currentDestinationId)).limit(1);
       const target = dest[0];
@@ -62,7 +69,20 @@ export async function updateTeacher(
       }
     }
     try {
-      const updated = await tx.update(teachers).set(patch).where(eq(teachers.id, id)).returning();
+      // Master plan E-3 — a Current-Destination change is recorded as a
+      // transactional destination-history transition (close previous period →
+      // create new → audit) in THIS same transaction. History is never
+      // invented for the pre-history gap; weekly assignments never touch it.
+      const destChanged =
+        Boolean(patch.currentDestinationId) && patch.currentDestinationId !== prior.currentDestinationId;
+      const { currentDestinationId: _dest, ...rest } = patch;
+      if (destChanged) {
+        await assignDestination(id, patch.currentDestinationId!, actor, { tx });
+      }
+      const fields = Object.keys(rest).length > 0 ? rest : null;
+      const updated = fields
+        ? await tx.update(teachers).set(fields).where(eq(teachers.id, id)).returning()
+        : await tx.select().from(teachers).where(eq(teachers.id, id)).limit(1);
       const row = updated[0]!;
       await audit(
         { user: actor, action: "UPDATED_TEACHER", entityType: "teacher", entityId: id, oldValue: before[0], newValue: row },
@@ -268,6 +288,15 @@ export async function changeCurrentDestination(
       .where(eq(teachers.id, teacherId))
       .returning();
     const row = updated[0]!;
+
+    // Master plan E-3 — the destination-history transition rides the SAME
+    // transaction: set/change creates the new period; clear closes the
+    // teacher's active period (records preserved — never deleted).
+    if (newDestinationId) {
+      await assignDestination(teacherId, newDestinationId, actor, { tx });
+    } else {
+      await closeActiveDestination(teacherId, tx);
+    }
 
     await audit(
       {

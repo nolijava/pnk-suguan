@@ -7,6 +7,7 @@ export * from "./weeks";
 export * from "./teacher-availability";
 export * from "./assignments";
 export * from "./assignment-history";
+export * from "./destination-history";
 export * from "./notifications";
 export * from "./audit-logs";
 
@@ -22,6 +23,8 @@ export const ASSIGNMENT_TYPE_PRIORITY: Record<string, number> = {
   RESERBA: 2,
   RESERBA_II: 3,
 };
-export const ASSIGNMENT_SOURCES = ["AUTO", "MANUAL", "OVERRIDE"] as const;
+export const ASSIGNMENT_SOURCES = ["AUTO", "MANUAL", "OVERRIDE", "HISTORICAL"] as const;
+// Historical is an assignment SOURCE / backfill workflow classification (§33) —
+// never a schedule status. Schedule status remains DRAFT/FINALIZED/PUBLISHED.
 export const ASSIGNMENT_STATUSES = ["ASSIGNED", "ABSENT", "INACTIVE"] as const;
 export const LANGUAGES = ["FILIPINO", "ENGLISH"] as const;

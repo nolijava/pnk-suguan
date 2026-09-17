@@ -64,6 +64,15 @@ function UpdatedBadge() {
   return <span className="badge badge-updated">[UPDATED]</span>;
 }
 
+/** §28 — source indicator; HISTORICAL is visually distinct from MANUAL/OVERRIDE. */
+function SourceBadge({ source }: { source: string }) {
+  return (
+    <span className={source === "HISTORICAL" ? "badge badge-historical" : "badge badge-gray"}>
+      {source}
+    </span>
+  );
+}
+
 function fmtDate(d: string | Date): string {
   const date = typeof d === "string" ? new Date(d) : d;
   return isNaN(date.getTime()) ? String(d) : date.toLocaleString();
@@ -232,6 +241,37 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
     return () => els.forEach((el) => el.removeEventListener("scroll", onScroll));
   }, [schedule.year]);
 
+  // Master plan §29 — on dashboard open, auto-position the synchronized
+  // horizontal scroll so the CURRENT ISO week is immediately visible (without
+  // hiding the rest of the year). Only when viewing the current ISO year; a
+  // different year is never force-scrolled. Week columns are equal-width
+  // (var(--week-col)), so the target offset derives from the week index and
+  // the sticky dako column width. Runs once per year render, after tables mount.
+  useEffect(() => {
+    if (!currentWeekKey) return; // non-current year — no false positioning
+    const els = wrapRefs.current.filter((e): e is HTMLDivElement => e !== null);
+    if (els.length === 0) return;
+    const target = Number(currentWeekKey.replace("W", ""));
+    if (!Number.isInteger(target) || target < 1 || target > schedule.weekCount) return;
+    const first = els[0]!;
+    if (first.scrollWidth <= first.clientWidth) return; // nothing to scroll
+    const weekIdx = target - 1;
+    const sticky = first.querySelector("th.dako-col") as HTMLElement | null;
+    const stickyW = sticky ? sticky.getBoundingClientRect().width : 0;
+    const firstWeekHeader = first.querySelector("thead th:nth-child(2)") as HTMLElement | null;
+    const weekW = firstWeekHeader
+      ? firstWeekHeader.getBoundingClientRect().width
+      : 0;
+    if (weekW <= 0) return;
+    // Center the current week in the visible area where possible; clamp to
+    // the scrollable range. The dako column is sticky (always visible), so
+    // the offset is measured from the scroll container's left edge.
+    const max = first.scrollWidth - first.clientWidth;
+    const absolute = stickyW + weekIdx * weekW;
+    const desired = Math.max(0, Math.min(max, absolute - first.clientWidth / 2));
+    for (const el of els) el.scrollLeft = desired;
+  }, [schedule.year, schedule.weekCount, currentWeekKey]);
+
   const weeks = Array.from({ length: schedule.weekCount }, (_, i) => i + 1);
 
   return (
@@ -314,7 +354,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                                   aria-haspopup="dialog"
                                 >
                                   <span>{c.teacherName}</span>
-                                  {c.source && c.source !== "AUTO" ? <span className="badge badge-gray">{c.source}</span> : null}
+                                  {c.source && c.source !== "AUTO" ? <SourceBadge source={c.source} /> : null}
                                   {modified ? <UpdatedBadge /> : null}
                                   {absent ? <AbsentBadge /> : null}
                                   {absent || modified ? (
@@ -330,7 +370,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                               ) : (
                                 <span className="cell-static" tabIndex={0}>
                                   <span>{c.teacherName}</span>
-                                  {c.source && c.source !== "AUTO" ? <span className="badge badge-gray">{c.source}</span> : null}
+                                  {c.source && c.source !== "AUTO" ? <SourceBadge source={c.source} /> : null}
                                   {modified ? <UpdatedBadge /> : null}
                                   {absent ? <AbsentBadge /> : null}
                                   {absent || modified ? (
@@ -377,7 +417,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
             <h3 id="cell-action-title">What would you like to do?</h3>
             <p>
               <strong>{step.ctx.teacherName}</strong> — {TYPE_LABEL[step.ctx.type]} · {weekLabel(step.ctx.weekNumber)} · {step.ctx.dakoName}
-              {step.source && step.source !== "AUTO" ? <> · <span className="badge badge-gray">{step.source}</span></> : null}
+              {step.source && step.source !== "AUTO" ? <> · <SourceBadge source={step.source} /></> : null}
             </p>
             <div className="modal-actions">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => { setClearChoice(""); setStep({ kind: "clear-reason", ctx: step.ctx }); }}>

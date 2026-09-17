@@ -7,3 +7,6 @@ export * as AssignmentService from "./assignment.service";
 export * as NotificationService from "./notification.service";
 export * as SchedulingService from "./scheduling.service";
 export { audit } from "./audit.service";
+export * as CorrectionService from "./correction.service";
+export * as DestinationHistoryService from "./destination-history.service";
+export * as HistoricalService from "./historical.service";

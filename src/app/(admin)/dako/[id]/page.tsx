@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/server/auth/guard";
-import { DakoService, AuditService } from "@/server/services";
+import { DakoService, AuditService, DestinationHistoryService } from "@/server/services";
 import { NotFoundError } from "@/lib/errors";
 import { StatusBadge, ConfirmDialog, Notice, StateCard } from "@/app/(admin)/_components";
 
@@ -35,6 +35,7 @@ export default async function DakoDetailsPage({
   const d = details.dako;
   const canWrite = user.roleCodes.includes("ADMIN") || user.roleCodes.includes("SCHEDULER");
   const auditRows = await AuditService.listAuditLogs({ entityType: "dako", entityId: id, pageSize: 50 });
+  const destinationHistory = await DestinationHistoryService.listForDako(id);
 
   async function disableAction(formData: FormData) {
     "use server";
@@ -139,6 +140,35 @@ export default async function DakoDetailsPage({
               )}
             </div>
           ) : null}
+        </section>
+
+        <section className="card">
+          <h2>Teacher Destination History</h2>
+          {destinationHistory.length === 0 ? (
+            <p>No recorded destination periods for this dako yet — records start when a teacher is destined here.</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Teacher</th><th>Date Destined</th><th>Date Ended</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {destinationHistory.map((p) => (
+                    <tr key={p.id}>
+                      <td><Link href={`/teachers/${p.teacherId}`}>{p.teacherName}</Link></td>
+                      <td>{p.startDate}</td>
+                      <td>{p.endDate ?? "—"}</td>
+                      <td>{p.endDate ? "Ended" : <strong>Active</strong>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="info-note">
+            The same normalized destination-history records shown on the teacher page — one active destined teacher at a
+            time; prior records preserved. Weekly Suguan assignments never create or modify these records.
+          </p>
         </section>
 
         <section className="card">

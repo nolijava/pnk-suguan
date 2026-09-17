@@ -166,8 +166,52 @@ Teacher/Dako codes are now system-assigned: `PNK-G-####` (Postgres sequence, sta
 | `/dako/new`, `/dako/[id]/edit` | dako.write | Phase 6: Dako Code auto-generated (ILGD-###) / immutable — not an input; anniversary computed note |
 | `/audit-logs` | audit.read | Audit viewer |
 
+## Master Consolidated Plan — revisions #1–#7 (Groups 1–7)
+
+Migration `0005_master_revision.sql` (applied to dev + test): SUPER_ADMIN role seed (§3), normalized `destination_history` table — one active period per teacher AND per dako via partial unique indexes (§8/§9), trigger-guard GUC alias alignment, and the `HISTORICAL` assignment source added to `assignments_source_check` (confirmed Phase 1 constraint gap; §56). No other schema change.
+
+**Roles:** `SUPER_ADMIN` is the §24 emergency-correction role — full ADMIN permissions plus the scoped PUBLISHED unlock. `LANGUAGE_MISMATCH` and `DAKO_DISABLED` remain non-overridable for every actor including SUPER_ADMIN.
+
+### Schedule correction & SUPER_ADMIN unlock (E-1/E-2)
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| POST | `/api/weeks/:weekId/correction` | assignments.write (service re-checks role) | `{ mode: "FINALIZED", action: "begin" \| "end", reason }` — ADMIN correction window on a FINALIZED week (status never changes; §23/Invariant 6). Audited `FINALIZED_CORRECTION_STARTED` / `FINALIZED_CORRECTION_ENDED` |
+| POST | `/api/weeks/:weekId/correction` | SUPER_ADMIN only | `{ mode: "PUBLISHED", secret, reason }` — §24 scoped unlock: server-verified secret (env; never logged/returned), selected week only, 30-min TTL grant, week remains PUBLISHED, no status downgrade, generic failure for wrong role/secret/state. Audited `PUBLISHED_SCHEDULE_UNLOCKED`; every correction after unlock is audited. LANGUAGE_MISMATCH stays impossible after unlock |
+
+`assertScheduleCorrectable` now gates every assignment mutation (create / change / replace / clear): DRAFT open; FINALIZED/PUBLISHED require an active correction/unlock grant held by the caller — the status column itself never changes through these paths (Invariants 6/7/8).
+
+### Destination history (E-3, §8/§9)
+
+A Current-Destination change is transactional: close the previous `destination_history` period (set end date), create the new one, update `teachers.current_destination_id`, audit `DESTINATION_HISTORY_UPDATED`. ONE normalized table serves both the teacher page and the dako page (`/teachers/[id]`, `/dako/[id]`). One active period per teacher and per dako (partial unique indexes); no invented dates; survives teacher INACTIVE and dako DISABLED; weekly Suguan assignments NEVER create or modify destination history (Invariant 3); clearing the destination closes (never deletes) the active period.
+
+### Delegate / Override / ADMIN exception (§19–§22)
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/scheduling/slot-candidates?weekId=&dakoId=&assignmentType=&assignmentId=` | assignments.read | Server-computed candidate list for one slot: `eligible` (only teachers passing the same `eligibilityCheck` as the engine — empty for Delegate's normal path) + `unavailable` with exact `violatedRules[]` and `overrideAllowed` (LANGUAGE_MISMATCH/DAKO_DISABLED ⇒ false, never selectable even in exception mode). The being-replaced teacher is excluded entirely on override; teachers busy elsewhere are `ALREADY_ASSIGNED_THIS_WEEK` |
+
+Weekly `/schedule` actions: **Delegate…** on empty slots (eligible-only picker, search by name, no reason, Review → Assign ⇒ `MANUAL`); **Override…** on filled slots (eligible-only picker + mandatory audited reason, Review → Confirm Override ⇒ `OVERRIDE`); separate ADMIN **exception mode** toggle listing unavailable candidates WITH their violated rule (blocked candidates render as NOT ALLOWABLE and stay disabled); **View Unavailable Teachers** informational panel (read-only list with reasons). Server re-validates everything — the UI never grants the bypass.
+
+### Historical Backfill (E-4, §32–§34, §56)
+
+Scheduling go-live is configurable (`src/server/config.ts`, `SCHEDULING_GO_LIVE = { year: 2026, week: 38 }`) — never hard-coded in logic. Weeks BEFORE go-live are recorded, never generated; weeks at/after go-live are generated, never recorded. `historical.service` + `scheduling.service` enforce this server-side (`HistoricalWeekError`), so a historical week can never become a mixed AUTO week. Historical rows keep `assignment_source = HISTORICAL` forever, count toward future fairness counts (Invariant 5), never mutate master data (Invariant 4), and the language hard rule applies to historical input (rejected, never auto-corrected).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/assignments/historical` | assignments.read | Pre-go-live weeks with `recorded` flag + configured go-live |
+| POST | `/api/assignments/historical` | assignments.write | `{ weekId, rows: [{ dakoId, teacherId, assignmentType }] }` — batch-record actual rows; per-row validation (existence, language, slot + teacher-week uniqueness); transactional; audited `HISTORICAL_BACKFILL_RECORDED` |
+| PATCH | `/api/assignments/historical` | assignments.write (ADMIN) | `{ assignmentId, teacherId?, assignmentType?, reason }` — correction with mandatory reason; source stays HISTORICAL; audited `HISTORICAL_CORRECTION` |
+
+`/historical` UI (assignments.read): week selector with recorded/not-recorded status, batch row editor (Dako/Suguan/Teacher with inline LANGUAGE_MISMATCH warning), recording confirmation, and the ADMIN-only Correct dialog. Linked from the main nav.
+
+### Dashboard & weekly additions (Group 7, §28/§29)
+
+The annual tables now show a distinct **HISTORICAL** badge (visually separate from MANUAL/OVERRIDE) on backfilled cells, and the dashboard auto-positions the synchronized horizontal scroll so the current ISO week is immediately visible when viewing the current ISO year (never for other years; full year remains scrollable). The §26 regeneration-snapshot field list (`id, weekId, dakoId, teacherId, assignmentType, assignmentSource, status, isOverride, overrideReason, assignedAt, assignedBy, updatedAt` + week identity) is asserted by test.
+
 ## Error codes
 
 `VALIDATION_ERROR` (422, with Zod issues) · `UNAUTHORIZED` (401) · `FORBIDDEN` (403) ·
 `NOT_FOUND` (404) · `CONFLICT` (409, e.g. duplicate code, already inactive/disabled, slot
-filled, week finalized) · `NOT_IMPLEMENTED` (501) · `INTERNAL` (500).
+filled, week finalized, historical/normal-cycle mixing) · `HISTORICAL_WEEK` (409, workflow
+separation) · `NOT_IMPLEMENTED` (501) · `INTERNAL` (500).

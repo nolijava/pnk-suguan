@@ -196,8 +196,8 @@ describe("updated_at trigger", () => {
 });
 
 describe("seed data (§38)", () => {
-  it("has exactly the three initial roles", async () => {
+  it("has exactly the four roles (Master plan §3 — SUPER_ADMIN added by migration 0005)", async () => {
     const rows = await db.select().from(schema.roles).orderBy(schema.roles.code);
-    expect(rows.map((r) => r.code)).toEqual(["ADMIN", "SCHEDULER", "VIEWER"]);
+    expect(rows.map((r) => r.code)).toEqual(["ADMIN", "SCHEDULER", "SUPER_ADMIN", "VIEWER"]);
   });
 });

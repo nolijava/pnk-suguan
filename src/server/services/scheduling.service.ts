@@ -17,6 +17,8 @@ import {
   weeks,
 } from "@/server/db/schema";
 import { ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
+import { isNormalSchedulingWeek, SCHEDULING_GO_LIVE } from "@/server/config";
+import { HistoricalWeekError } from "./historical.service";
 import { audit } from "./audit.service";
 import type { SessionUser } from "@/server/auth/session";
 import { buildSchedulingContext } from "./scheduling/buildContext";
@@ -137,6 +139,15 @@ export async function generateSchedule(
       .limit(1);
     const week = locked[0];
     if (!week) throw new NotFoundError("week not found");
+    // Master plan E-4 — server-side workflow separation: pre-go-live weeks are
+    // HISTORICAL-only and can never be processed by automatic generation
+    // (source exclusivity; not just a UI filter).
+    if (!isNormalSchedulingWeek(week.year, week.isoWeekNumber)) {
+      throw new HistoricalWeekError(
+        `week ${week.year}-W${week.isoWeekNumber} is before the scheduling go-live ` +
+          `(${SCHEDULING_GO_LIVE.year}-W${SCHEDULING_GO_LIVE.week}); historical weeks are recorded via the Historical Backfill workflow only`,
+      );
+    }
     if (week.status !== "DRAFT") {
       throw new ConflictError(
         `schedule generation requires a DRAFT week (week is ${week.status})`,

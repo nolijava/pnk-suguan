@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
-export const ROLE_CODES = ["ADMIN", "SCHEDULER", "VIEWER"] as const;
+export const ROLE_CODES = ["ADMIN", "SCHEDULER", "VIEWER", "SUPER_ADMIN"] as const;
 export type RoleCode = (typeof ROLE_CODES)[number];
 
 export const roles = pgTable("roles", {

@@ -285,11 +285,28 @@ describe("phase 7 — weekly suguan PDF (read-only output layer)", () => {
   });
 
   // ------------------------------------------------- single-page guarantee
-  it("layout: section table column widths exactly span the printable width", async () => {
-    const src = (await import("fs")).readFileSync("src/server/services/weekly-suguan-pdf.service.ts", "utf8");
-    const cols = src.match(/cols: \{ dako: (\d+), oras: (\d+), pangalan: (\d+), pagtanggap: (\d+), pagbabago: (\d+)/)!;
-    const sum = Number(cols[1]) + Number(cols[2]) + Number(cols[3]) + Number(cols[4]) + Number(cols[5]);
-    expect(sum).toBe(8.5 * 72 - 2 * 0.5 * 72); // 540pt printable width
+  it("layout: §48 column widths exact-span 540pt and match approved proportions", async () => {
+    const { sectionColumnWidths } = await import("@/server/services/weekly-suguan-pdf.service");
+    const W = 8.5 * 72 - 2 * 0.5 * 72; // 540pt printable width
+    for (const section of ["A", "B", "C"] as const) {
+      const widths = sectionColumnWidths(section);
+      expect(widths.reduce((a, b) => a + b, 0)).toBe(W);
+    }
+    // §48 proportions (A/B): DAKO ≈14.6%, ORAS ≈9.1%, PANGALAN ≈29.8%,
+    // PAGTANGGAP ≈22.2%, PAGBABAGO remainder — never equal-width.
+    const [dako = 0, oras = 0, pangalan = 0, pagtanggap = 0, pagbabago = 0] = sectionColumnWidths("A");
+    expect(dako / 540).toBeGreaterThan(0.14);
+    expect(dako / 540).toBeLessThan(0.155);
+    expect(oras / 540).toBeGreaterThan(0.08);
+    expect(oras / 540).toBeLessThan(0.10);
+    expect(pangalan / 540).toBeGreaterThan(0.29);
+    expect(pangalan / 540).toBeLessThan(0.305);
+    expect(pagtanggap / 540).toBeGreaterThan(0.21);
+    expect(pagtanggap / 540).toBeLessThan(0.225);
+    expect(pagbabago / 540).toBeGreaterThan(0.21);
+    expect(pagbabago / 540).toBeLessThan(0.25);
+    // §42 — Section C carries SIX columns including PAGTUPAD.
+    expect(sectionColumnWidths("C").length).toBe(6);
   });
 
   it("layout: the physical form is ALWAYS exactly ONE page — dense 22-dako case included", async () => {

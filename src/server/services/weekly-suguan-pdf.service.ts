@@ -18,6 +18,7 @@ import { getDb } from "@/server/db/client";
 import { dako, weeks } from "@/server/db/schema";
 import { isoWeekDates } from "@/lib/iso-week";
 import { NotFoundError } from "@/lib/errors";
+import { isNormalSchedulingWeek } from "@/server/config";
 import { listAssignmentsForWeek } from "./assignment.service";
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,7 @@ export interface WeeklySuguanViewModel {
     weekNo: number;
   };
   sectionA: { heading: string; rows: SuguanFormRow[] }; // ALL ACTIVE dakos
-  sectionB: { heading: string; rows: SuguanFormRow[] }; // ALL ACTIVE dakos
+  sectionB: { heading: string; rows: SuguanFormRow[] }; // ALL APPLICABLE dakos (see dakoInclusion)
   /** null ⇔ zero RESERBA_II assignments ⇒ section C omitted entirely. */
   sectionC: { heading: string; rows: SuguanFormRow[] } | null;
   sectionD: { heading: string; rows: { gampanin: string }[] }; // static 4 SUGO + 2 RESERBA
@@ -79,16 +80,37 @@ export async function buildWeeklySuguanViewModel(weekId: string): Promise<Weekly
   // Guard: the weeks row must agree with ISO math (52/53-safe Sunday calc).
   const { endDate } = isoWeekDates(weekRow.year, weekRow.isoWeekNumber);
 
-  const [activeDakos, assignments] = await Promise.all([
+  // §43 / clarification #9 — applicable-dako determination.
+  //  • Normal operational weeks (≥ SCHEDULING_GO_LIVE): ALL currently ACTIVE dakos.
+  //  • Historical weeks (< go-live): only dakos whose active status for that
+  //    week can be reliably determined from RECORDED master facts — include a
+  //    DISABLED dako only when a recorded date_disabled is AFTER the week's
+  //    end date (proof it was active that week). When indeterminate, the
+  //    conservative current-rule fallback applies. Historical status is NEVER
+  //    invented and no fake status records are created for rendering.
+  const [allDakos, assignments] = await Promise.all([
     db
-      .select({ id: dako.id, name: dako.name, dakoCode: dako.dakoCode, worshipTime: dako.worshipTime })
-      .from(dako)
-      .where(eq(dako.status, "ACTIVE")),
+      .select({
+        id: dako.id,
+        name: dako.name,
+        dakoCode: dako.dakoCode,
+        worshipTime: dako.worshipTime,
+        status: dako.status,
+        dateDisabled: dako.dateDisabled,
+      })
+      .from(dako),
     listAssignmentsForWeek(weekId),
   ]);
 
+  const isHistoricalWeek = !isNormalSchedulingWeek(weekRow.year, weekRow.isoWeekNumber);
+  const applicable = allDakos.filter((d) => {
+    if (d.status === "ACTIVE") return true;
+    if (!isHistoricalWeek) return false; // normal week: currently ACTIVE only
+    return d.dateDisabled !== null && d.dateDisabled > endDate; // recorded fact
+  });
+
   // Deterministic order consistent with master-data convention.
-  const ordered = [...activeDakos].sort(
+  const ordered = [...applicable].sort(
     (a, b) => a.dakoCode.localeCompare(b.dakoCode) || a.name.localeCompare(b.name),
   );
 
@@ -105,7 +127,12 @@ export async function buildWeeklySuguanViewModel(weekId: string): Promise<Weekly
   }
 
   const mkRows = (type: string): SuguanFormRow[] =>
-    ordered.map((d) => ({ dakoName: d.name, oras: d.worshipTime, pangalan: byType.get(type)?.get(d.id) ?? null }));
+    ordered.map((d) => ({
+      dakoName: d.name,
+      oras: d.worshipTime,
+      pangalan: byType.get(type)?.get(d.id) ?? null,
+      dakoStatusAt: d.status === "ACTIVE" ? ("ACTIVE" as const) : ("DISABLED" as const),
+    }));
 
   const sugo = mkRows("SUGO");
   const reserba = mkRows("RESERBA");
@@ -120,7 +147,7 @@ export async function buildWeeklySuguanViewModel(weekId: string): Promise<Weekly
       weekNo: weekRow.isoWeekNumber,
     },
     sectionA: { heading: "A. SUGO", rows: sugo },
-    sectionB: { heading: "B. RESERBA", rows: reserba },
+    sectionB: { heading: "B. RESERBA / RESERBA I", rows: reserba },
     sectionC: reserbaIiRows.length === 0 ? null : { heading: "C. RESERBA II", rows: reserbaIiRows },
     sectionD: {
       heading: "D. MGA MAGTUTURO SA KLASE",
@@ -151,8 +178,7 @@ const MARGIN = 0.5 * 72; // 36pt
 const L = {
   titleSize: 13,
   titleLead: 16,
-  headerLineSize: 10,
-  headerLineLead: 15,
+  headerLineSize: 8.5,
   headerGapAfter: 8,
   sectionGap: 14,
   headingSize: 10.5,
@@ -161,21 +187,49 @@ const L = {
   cellLead: 10,
   cellPadX: 4,
   headerRowH: 18,
-  // Sum must equal PAGE_W − 2·MARGIN = 540pt (verified by a test).
-  cols: { dako: 170, oras: 60, pangalan: 170, pagtanggap: 70, pagbabago: 70 } as
-    | { dako: number; oras: number; pangalan: number; pagtanggap: number; pagbabago: number },
+  headerFill: "#4b5563", // §47 dark-gray header fill
 };
 
-// Distribute remaining width to Pagbabago so the table exactly spans the page.
-L.cols.pagbabago = PAGE_W - 2 * MARGIN - L.cols.dako - L.cols.oras - L.cols.pangalan - L.cols.pagtanggap;
-
-const SECTION_COLS = [
-  { key: "dako", label: "Dako", w: L.cols.dako },
-  { key: "oras", label: "Oras", w: L.cols.oras },
-  { key: "pangalan", label: "Pangalan", w: L.cols.pangalan },
-  { key: "pagtanggap", label: "Pagtanggap", w: L.cols.pagtanggap },
-  { key: "pagbabago", label: "Pagbabago", w: L.cols.pagbabago },
+// §48 column proportions (approximate, not equal-width). Each set sums
+// EXACTLY to the 540pt content width (verified by a test).
+//   A/B: DAKO 14.6% · ORAS 9.1% · PANGALAN 29.8% · PAGTANGGAP 22.2% · PAGBABAGO remainder
+//   C (6 cols): redistributed; PAGTUPAD shares the signature-column band.
+const AB_COLS = [
+  { key: "dako", label: "DAKO", w: 79 },
+  { key: "oras", label: "ORAS", w: 49 },
+  { key: "pangalan", label: "PANGALAN", w: 161 },
+  { key: "pagtanggap", label: "PAGTANGGAP", w: 120 },
+  { key: "pagbabago", label: "PAGBABAGO", w: 131 },
 ] as const;
+
+const C_COLS = [
+  { key: "dako", label: "DAKO", w: 70 },
+  { key: "oras", label: "ORAS", w: 45 },
+  { key: "pangalan", label: "PANGALAN", w: 140 },
+  { key: "pagtanggap", label: "PAGTANGGAP", w: 95 },
+  { key: "pagtupad", label: "PAGTUPAD", w: 95 },
+  { key: "pagbabago", label: "PAGBABAGO", w: 95 },
+] as const;
+
+/** §48 — exported for proportion tests. Each list sums to the content width. */
+export function sectionColumnWidths(section: "A" | "B" | "C"): number[] {
+  const cols = section === "C" ? C_COLS : AB_COLS;
+  return cols.map((c) => c.w);
+}
+
+// §39 — bordered header information table (single row, 8 cells).
+const HEADER_INFO_CELLS: { label: string; w: number }[] = [
+  { label: "DISTRITO", w: 70 },
+  { label: "", w: 65 }, // value cell (MME)
+  { label: "LOKAL", w: 70 },
+  { label: "", w: 65 }, // value cell (ILUGIN)
+  { label: "PETSA", w: 70 },
+  { label: "", w: 65 }, // value cell (Sunday date)
+  { label: "WEEK NO.", w: 70 },
+  { label: "", w: 65 }, // value cell (ISO week)
+];
+
+const SECTION_COLS = AB_COLS; // A/B column definition
 
 function drawWatermark(doc: PDFKit.PDFDocument) {
   doc.save();
@@ -215,7 +269,7 @@ function computeRowH(c: WeeklySuguanViewModel): number {
   const fixedH =
     MARGIN +
     (L.titleLead + 4) +
-    L.headerLineLead * 2 +
+    20 + // §39 header information table (single bordered row)
     L.headerGapAfter +
     headings * L.headingLead +
     tableHeadRows * L.headerRowH +
@@ -239,14 +293,20 @@ function drawSectionHeading(doc: PDFKit.PDFDocument, y: number, text: string): n
   return y + L.headingLead;
 }
 
-function drawSectionTable(doc: PDFKit.PDFDocument, y: number, rows: SuguanFormRow[], rowH: number): number {
+function drawSectionTable(
+  doc: PDFKit.PDFDocument,
+  y: number,
+  rows: SuguanFormRow[],
+  rowH: number,
+  cols: readonly { key: string; label: string; w: number }[] = SECTION_COLS,
+): number {
   const tableW = PAGE_W - 2 * MARGIN;
 
   const drawHeadRow = (yy: number) => {
     doc.font("Helvetica-Bold").fontSize(L.cellSize).fillColor("#000");
     doc.rect(MARGIN, yy, tableW, L.headerRowH).stroke();
     let x = MARGIN;
-    for (const c of SECTION_COLS) {
+    for (const c of cols) {
       if (c.key !== "dako") doc.moveTo(x, yy).lineTo(x, yy + L.headerRowH).stroke();
       doc.text(c.label, x + L.cellPadX, yy + 5, { width: c.w - 2 * L.cellPadX, height: L.headerRowH - 8, lineBreak: false });
       x += c.w;
@@ -260,16 +320,21 @@ function drawSectionTable(doc: PDFKit.PDFDocument, y: number, rows: SuguanFormRo
     doc.font("Helvetica").fontSize(L.cellSize).fillColor("#000");
     doc.rect(MARGIN, cy, tableW, rowH).stroke();
     let x = MARGIN;
-    const cells: [string, string | null][] = [
-      ["dako", row.dakoName],
-      ["oras", row.oras],
-      ["pangalan", row.pangalan ?? ""],
-      ["pagtanggap", ""],
-      ["pagbabago", ""],
-    ];
-    for (const [key, val] of cells) {
-      const col = SECTION_COLS.find((c) => c.key === key)!;
-      if (key !== "dako") doc.moveTo(x, cy).lineTo(x, cy + rowH).stroke();
+    // §40/§41/§42 — PAGTANGGAP, PAGTUPAD and PAGBABAGO are ALWAYS blank
+    // (physical signature/annotation areas); PANGALAN is blank when the dako
+    // has no assignment. Cells are resolved by column key so the six-column
+    // Section C variant renders identically.
+    const values: Record<string, string | null> = {
+      dako: row.dakoName,
+      oras: row.oras,
+      pangalan: row.pangalan ?? "",
+      pagtanggap: "",
+      pagtupad: "",
+      pagbabago: "",
+    };
+    for (const c of cols) {
+      if (c.key !== "dako") doc.moveTo(x, cy).lineTo(x, cy + rowH).stroke();
+      const val = values[c.key] ?? "";
       if (val) {
         // In-cell wrapping for long names; structure never changes. The
         // height box is applied ONLY when the row can hold one line of text:
@@ -278,12 +343,12 @@ function drawSectionTable(doc: PDFKit.PDFDocument, y: number, rows: SuguanFormRo
         // pages, which would break the one-sheet physical-form guarantee.
         const cellH = rowH - 8;
         doc.text(val, x + L.cellPadX, cy + 4, {
-          width: col.w - 2 * L.cellPadX,
+          width: c.w - 2 * L.cellPadX,
           ...(cellH >= 12 ? { height: cellH } : {}),
           ellipsis: false,
         });
       }
-      x += col.w;
+      x += c.w;
     }
     cy += rowH;
   }
@@ -359,18 +424,47 @@ export async function renderWeeklySuguanPdf(vm: WeeklySuguanViewModel): Promise<
 
   let y = MARGIN;
 
-  // Header
+  // Header — title, then the §39 bordered information table.
   doc.font("Helvetica-Bold").fontSize(L.titleSize).fillColor("#000");
   doc.text(vm.header.title, MARGIN, y, { width: PAGE_W - 2 * MARGIN, align: "center" });
   y += L.titleLead + 4;
 
-  doc.font("Helvetica").fontSize(L.headerLineSize);
-  doc.text(`Distrito: ${vm.header.distrito}`, MARGIN, y, { width: 200, lineBreak: false });
-  doc.text(`Lokal: ${vm.header.lokal}`, MARGIN + 200, y, { width: 200, lineBreak: false });
-  y += L.headerLineLead;
-  doc.text(`Petsa: ${vm.header.petsa}`, MARGIN, y, { width: 200, lineBreak: false });
-  doc.text(`WEEK NO. ${vm.header.weekNo}`, MARGIN + 200, y, { width: 200, lineBreak: false });
-  y += L.headerLineLead + L.headerGapAfter;
+  // §39 — DISTRITO | MME | LOKAL | ILUGIN | PETSA | <Sunday> | WEEK NO. | <W##>
+  // Dark-gray label cells with white uppercase text (§47); value cells white.
+  const INFO_VALUES: Record<number, string> = {
+    1: vm.header.distrito,
+    3: vm.header.lokal,
+    5: vm.header.petsa,
+    7: `W${vm.header.weekNo}`,
+  };
+  const infoH = 20;
+  const infoW = PAGE_W - 2 * MARGIN;
+  doc.rect(MARGIN, y, infoW, infoH).stroke();
+  let ix = MARGIN;
+  HEADER_INFO_CELLS.forEach((cell) => {
+    if (cell.label) {
+      doc.save();
+      doc.fillColor(L.headerFill).rect(ix, y, cell.w, infoH).fill();
+      doc.restore();
+    }
+    ix += cell.w;
+  });
+  ix = MARGIN;
+  HEADER_INFO_CELLS.forEach((cell, i) => {
+    if (i > 0) doc.moveTo(ix, y).lineTo(ix, y + infoH).stroke();
+    if (cell.label) {
+      doc.font("Helvetica-Bold").fontSize(L.headerLineSize).fillColor("#000");
+      doc.text(cell.label, ix + L.cellPadX, y + 6, { width: cell.w - 2 * L.cellPadX, lineBreak: false });
+    } else {
+      const value = INFO_VALUES[i];
+      if (value !== undefined) {
+        doc.font("Helvetica").fontSize(L.headerLineSize).fillColor("#000");
+        doc.text(value, ix + L.cellPadX, y + 6, { width: cell.w - 2 * L.cellPadX, lineBreak: false });
+      }
+    }
+    ix += cell.w;
+  });
+  y += infoH + L.headerGapAfter;
 
   // Sections A–C — single-page guarantee: rowH computed to fit ALL content.
   const rowH = computeRowH(vm);
@@ -380,7 +474,7 @@ export async function renderWeeklySuguanPdf(vm: WeeklySuguanViewModel): Promise<
   y = drawSectionTable(doc, y, vm.sectionB.rows, rowH) + L.sectionGap;
   if (vm.sectionC) {
     y = drawSectionHeading(doc, y, vm.sectionC.heading);
-    y = drawSectionTable(doc, y, vm.sectionC.rows, rowH) + L.sectionGap;
+    y = drawSectionTable(doc, y, vm.sectionC.rows, rowH, C_COLS) + L.sectionGap;
   }
 
   // Section D (static)
@@ -412,5 +506,5 @@ export async function generateWeeklySuguanPdf(weekId: string): Promise<{ buffer:
   return { buffer: await renderWeeklySuguanPdf(vm), vm };
 }
 
-// keep drizzle helpers referenced for future filters (no-op)
+// imports used by the §43 applicable-dako determination above
 void and;

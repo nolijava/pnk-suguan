@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/server/auth/guard";
-import { TeacherService, DakoService, AuditService } from "@/server/services";
+import { TeacherService, DakoService, AuditService, DestinationHistoryService } from "@/server/services";
 import { NotFoundError } from "@/lib/errors";
 import { StatusBadge, ConfirmDialog, Notice, StateCard } from "@/app/(admin)/_components";
 
@@ -35,9 +35,10 @@ export default async function TeacherDetailsPage({
   }
   const t = details.teacher;
   const canWrite = user.roleCodes.includes("ADMIN") || user.roleCodes.includes("SCHEDULER");
-  const [auditRows, activeDako] = await Promise.all([
+  const [auditRows, activeDako, destinationHistory] = await Promise.all([
     AuditService.listAuditLogs({ entityType: "teacher", entityId: id, pageSize: 50 }),
     DakoService.listDako({ status: "ACTIVE", pageSize: 100 }),
+    DestinationHistoryService.listForTeacher(id),
   ]);
   const destDisabled =
     t.currentDestinationId !== null &&
@@ -207,6 +208,38 @@ export default async function TeacherDetailsPage({
               <p className="info-note">Disabled dako are never selectable here; an existing disabled destination is preserved until explicitly changed.</p>
             </form>
           ) : null}
+        </section>
+
+        <section className="card">
+          <h2>Destination History</h2>
+          {destinationHistory.length === 0 ? (
+            <p>
+              No recorded destination periods yet. The first period starts when a Current Destination is set —
+              historical dates are never invented.
+            </p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Dako</th><th>Date Destined</th><th>Date Ended</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {destinationHistory.map((p) => (
+                    <tr key={p.id}>
+                      <td>{p.dakoName ? <Link href={`/dako/${p.dakoId}`}>{p.dakoName}</Link> : "—"}</td>
+                      <td>{p.startDate}</td>
+                      <td>{p.endDate ?? "—"}</td>
+                      <td>{p.endDate ? "Ended" : <strong>Active</strong>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="info-note">
+            One active period at a time; previous periods are preserved (never deleted) and survive inactivity or a disabled dako.
+            Weekly Suguan assignments never create or modify these records.
+          </p>
         </section>
 
         <section className="card">

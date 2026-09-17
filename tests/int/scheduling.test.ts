@@ -227,13 +227,23 @@ describe("scheduling engine", () => {
     expect(snap.length).toBe(autoBefore.length);
     expect(new Set(snap.map((s) => s.id))).toEqual(new Set(autoBefore.map((r) => r.id)));
     for (const s of snap) {
+      // Master plan §26 — complete reconstruction field list.
+      expect(s).toHaveProperty("id");
       expect(s).toHaveProperty("weekId");
       expect(s).toHaveProperty("dakoId");
       expect(s).toHaveProperty("teacherId");
       expect(s).toHaveProperty("assignmentType");
       expect(s).toHaveProperty("assignmentSource");
+      expect(s).toHaveProperty("status");
+      expect(s).toHaveProperty("isOverride");
+      expect(s).toHaveProperty("overrideReason");
       expect(s).toHaveProperty("assignedAt");
+      expect(s).toHaveProperty("assignedBy");
+      expect(s).toHaveProperty("updatedAt");
     }
+    // Week identity + generation context are present in the audit row.
+    const oldVal = regenAudits[0]!.oldValue as { week: Record<string, unknown>; previousAutoAssignments: unknown[] };
+    expect(oldVal.week).toMatchObject({ id: expect.any(String), year: expect.any(Number), isoWeekNumber: expect.any(Number), status: expect.any(String) });
   });
 
   it("generation is rejected outside DRAFT; PUBLISHED stays immutable (§14/§5 of clarification)", async () => {

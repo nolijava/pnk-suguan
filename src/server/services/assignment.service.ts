@@ -22,6 +22,7 @@ import { isTeacherEligibleForDako, isNonOverrideableRule, type Language } from "
 import { ForbiddenError, ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
 import { audit } from "./audit.service";
 import { assertWeekMutable } from "./week.service";
+import { assertScheduleCorrectable } from "./correction.service";
 import { applyAvailabilityUpsert, wasAbsentPreviousWeekBatch } from "./availability.service";
 import { buildSchedulingContext } from "./scheduling/buildContext";
 import { eligibilityCheck } from "./scheduling/eligibility";
@@ -56,7 +57,9 @@ export async function createAssignment(
   }
 
   return withTransaction(async (tx) => {
-    await assertWeekMutable(tx, input.weekId);
+    // Master plan E-1: DRAFT open; FINALIZED/PUBLISHED need an active grant
+    // held by the caller (status column never changes here).
+    await assertScheduleCorrectable(tx, input.weekId, actor);
 
     const tRow = await tx.select().from(teachers).where(eq(teachers.id, input.teacherId)).limit(1);
     const t = tRow[0];
@@ -212,7 +215,7 @@ export async function changeAssignment(
   return withTransaction(async (tx) => {
     const before = (await tx.select().from(assignments).where(eq(assignments.id, id)).limit(1))[0];
     if (!before) throw new NotFoundError("assignment not found");
-    await assertWeekMutable(tx, before.weekId);
+    await assertScheduleCorrectable(tx, before.weekId, actor);
 
     // §15 — if the PROPOSED state violates a hard eligibility rule, only ADMIN
     // may proceed, and the reason must state the override (mandatory, non-empty;
@@ -330,8 +333,9 @@ export async function clearAssignment(
     const rows = await tx.select().from(assignments).where(eq(assignments.id, assignmentId)).limit(1);
     const before = rows[0];
     if (!before) throw new NotFoundError("assignment not found");
-    // §28 — PUBLISHED is immutable; this runs BEFORE the cascade GUC is set.
-    await assertWeekMutable(tx, before.weekId);
+    // §28/E-1 — DRAFT open; FINALIZED/PUBLISHED need an active grant held by
+    // the caller. Runs BEFORE the cascade GUC is set.
+    await assertScheduleCorrectable(tx, before.weekId, actor);
 
     // §5 — TEACHER_ABSENT marks the ORIGINAL teacher ABSENT for the selected
     // week (reason mandatory), inside the same transaction.
@@ -433,7 +437,7 @@ export async function replaceAbsentTeacher(
     const rows = await tx.select().from(assignments).where(eq(assignments.id, assignmentId)).limit(1);
     const before = rows[0];
     if (!before) throw new NotFoundError("assignment not found");
-    await assertWeekMutable(tx, before.weekId);
+    await assertScheduleCorrectable(tx, before.weekId, actor);
 
     if (body.replacementTeacherId === before.teacherId) {
       throw new ValidationError("replacement teacher must differ from the absent teacher");
@@ -548,6 +552,98 @@ export async function listEligibleReplacements(
     }
   }
   return { rows };
+}
+
+/**
+ * Master plan §19/§21/§22 — batched candidate list for the manual Delegate /
+ * Override dialogs. ONE scheduling context serves every dako+type slot of the
+ * week; each candidate carries its exact violated-rule set so the UI can show
+ * eligible teachers, and (ADMIN exception mode only) ineligible ones with
+ * their specific violation. The server — never the frontend — decides
+ * eligibility; LANGUAGE_MISMATCH/DAKO_DISABLED stay structurally excluded
+ * because eligibilityCheck marks them non-overridable.
+ */
+export async function listSlotCandidates(
+  weekId: string,
+  dakoId: string,
+  assignmentType: string,
+  assignmentId?: string,
+): Promise<{
+  slot: { dakoId: string; assignmentType: string };
+  eligible: { teacherId: string; teacherCode: string; fullName: string; language: string }[];
+  unavailable: {
+    teacherId: string;
+    teacherCode: string;
+    fullName: string;
+    language: string;
+    violatedRules: string[];
+    overrideAllowed: boolean;
+  }[];
+}> {
+  const ctx = await buildSchedulingContext(weekId);
+  const dakoRow = ctx.dakos.find((d) => d.dakoId === dakoId);
+  if (!dakoRow) throw new NotFoundError("dako not found");
+
+  // The current assignment's teacher is being replaced — excluded entirely
+  // from both lists (same convention as listEligibleReplacements).
+  let currentTeacherId: string | null = null;
+  if (assignmentId) {
+    const cur = await getDb()
+      .select({ teacherId: assignments.teacherId })
+      .from(assignments)
+      .where(eq(assignments.id, assignmentId))
+      .limit(1);
+    currentTeacherId = cur[0]?.teacherId ?? null;
+  }
+
+  // Teachers already holding another assignment this week are immovable for
+  // this slot too (one assignment per teacher per week).
+  const busyIds = new Set<string>();
+  for (const a of await listAssignmentsForWeek(weekId)) {
+    if (a.teacherId && a.teacherId !== currentTeacherId) {
+      busyIds.add(a.teacherId);
+    }
+  }
+
+  const eligible: { teacherId: string; teacherCode: string; fullName: string; language: string }[] = [];
+  const unavailable: {
+    teacherId: string; teacherCode: string; fullName: string; language: string;
+    violatedRules: string[]; overrideAllowed: boolean;
+  }[] = [];
+  for (const t of ctx.teachers) {
+    if (t.teacherId === currentTeacherId) continue; // the teacher being replaced
+    if (busyIds.has(t.teacherId)) {
+      // Busy elsewhere — a hard conflict regardless of other rules.
+      unavailable.push({
+        teacherId: t.teacherId,
+        teacherCode: t.teacherCode,
+        fullName: t.fullName,
+        language: t.language,
+        violatedRules: ["ALREADY_ASSIGNED_THIS_WEEK"],
+        overrideAllowed: false,
+      });
+      continue;
+    }
+    const check = eligibilityCheck(t, dakoRow, ctx);
+    if (check.eligible) {
+      eligible.push({
+        teacherId: t.teacherId,
+        teacherCode: t.teacherCode,
+        fullName: t.fullName,
+        language: t.language,
+      });
+    } else {
+      unavailable.push({
+        teacherId: t.teacherId,
+        teacherCode: t.teacherCode,
+        fullName: t.fullName,
+        language: t.language,
+        violatedRules: check.violatedRules,
+        overrideAllowed: check.overrideAllowed,
+      });
+    }
+  }
+  return { slot: { dakoId, assignmentType }, eligible, unavailable };
 }
 
 export async function getAssignment(id: string) {

@@ -3,6 +3,7 @@ import {
   teacherStatusSchema,
   dakoStatusSchema,
   languageSchema,
+  assignmentTypeSchema,
 } from "./schemas";
 
 const sortDir = z.enum(["asc", "desc"]);
@@ -94,3 +95,75 @@ export type DakoQuery = z.infer<typeof dakoQuerySchema>;
 export type CurrentDestinationChange = z.infer<typeof currentDestinationChangeSchema>;
 export type AvailabilityQuery = z.infer<typeof availabilityQuerySchema>;
 export type AvailabilityCorrection = z.infer<typeof availabilityCorrectionSchema>;
+
+/**
+ * Master plan E-1/E-2 — schedule correction (FINALIZED) and SUPER_ADMIN
+ * PUBLISHED unlock. The secret never reaches logs, responses, or URLs; the
+ * service produces an identical generic failure for wrong role / wrong
+ * secret / bad state.
+ */
+export const scheduleCorrectionSchema = z
+  .object({
+    mode: z.enum(["FINALIZED", "PUBLISHED"]),
+    action: z.enum(["begin", "end"]),
+    reason: z.string().max(500).optional(),
+    secret: z.string().max(500).optional(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.action === "begin" && (!v.reason || !v.reason.trim())) {
+      ctx.addIssue({ code: "custom", message: "reason is required to begin a schedule correction" });
+    }
+    if (v.mode === "PUBLISHED" && v.action === "begin" && (!v.secret || !v.secret)) {
+      ctx.addIssue({ code: "custom", message: "secret is required for a PUBLISHED unlock" });
+    }
+  });
+
+export type ScheduleCorrection = z.infer<typeof scheduleCorrectionSchema>;
+
+/** Master plan E-4 — historical backfill batch input. */
+export const historicalBatchSchema = z.object({
+  weekId: z.string().uuid(),
+  rows: z
+    .array(
+      z.object({
+        dakoId: z.string().uuid(),
+        teacherId: z.string().uuid(),
+        assignmentType: z.enum(["SUGO", "RESERBA", "RESERBA_II"]),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+export type HistoricalBatch = z.infer<typeof historicalBatchSchema>;
+
+/** Master plan E-4 — historical correction (reason mandatory). */
+export const historicalCorrectionSchema = z.object({
+  assignmentId: z.string().uuid(),
+  teacherId: z.string().uuid().optional(),
+  assignmentType: z.enum(["SUGO", "RESERBA", "RESERBA_II"]).optional(),
+  reason: z.string().trim().min(1).max(500),
+});
+
+export type HistoricalCorrection = z.infer<typeof historicalCorrectionSchema>;
+
+/** Master plan E-3 — destination assignment (close previous + create new). */
+/** Master plan §19/§21/§22 — one week+dako+type slot's candidate list query. */
+export const slotCandidatesQuerySchema = z.object({
+  weekId: z.string().uuid(),
+  dakoId: z.string().uuid(),
+  assignmentType: assignmentTypeSchema,
+  /** When replacing an existing assignment, it is excluded from the busy set. */
+  assignmentId: z.string().uuid().optional(),
+});
+
+export const destinationAssignSchema = z.object({
+  dakoId: z.string().uuid(),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "startDate must be YYYY-MM-DD")
+    .optional(),
+});
+
+export type DestinationAssign = z.infer<typeof destinationAssignSchema>;

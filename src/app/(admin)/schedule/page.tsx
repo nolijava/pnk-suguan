@@ -154,14 +154,14 @@ export default async function SchedulePage({
 
       <ScheduleActions
         weekId={week.id}
+        weekYear={week.year}
+        weekNumber={week.isoWeekNumber}
         weekStatus={week.status as "DRAFT" | "FINALIZED" | "PUBLISHED"}
         canWrite={canWrite}
         canGenerate={canGenerate}
         canFinalize={canFinalize}
         canPublish={canPublish}
         canPdf={canPdf}
-        pdfYear={year}
-        pdfWeek={weekNum}
         absenceCount={absenceCount.count}
         rows={rows}
         summary={summary}
