@@ -147,7 +147,10 @@ export async function createAssignment(
 }
 
 function canOverride(actor: SessionUser): boolean {
-  return actor.roleCodes.includes("ADMIN");
+  // SUPER_ADMIN carries the full ADMIN permission set (incl. assignments
+  // .override); role codes are checked directly because the service layer
+  // receives SessionUser.roleCodes, not the resolved permission array.
+  return actor.roleCodes.includes("ADMIN") || actor.roleCodes.includes("SUPER_ADMIN");
 }
 
 /**

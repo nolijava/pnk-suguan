@@ -177,7 +177,7 @@ Migration `0005_master_revision.sql` (applied to dev + test): SUPER_ADMIN role s
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | POST | `/api/weeks/:id/correction` | assignments.write (service re-checks role) | `{ mode: "FINALIZED", action: "begin" \| "end", reason }` — ADMIN correction window on a FINALIZED week (status never changes; §23/Invariant 6). Audited `FINALIZED_CORRECTION_STARTED` / `FINALIZED_CORRECTION_ENDED` |
-| POST | `/api/weeks/:id/correction` | SUPER_ADMIN only | `{ mode: "PUBLISHED", secret, reason }` — §24 scoped unlock: server-verified secret (env; never logged/returned), selected week only, 30-min TTL grant, week remains PUBLISHED, no status downgrade, generic failure for wrong role/secret/state. Audited `PUBLISHED_SCHEDULE_UNLOCKED`; every correction after unlock is audited. LANGUAGE_MISMATCH stays impossible after unlock |
+| POST | `/api/weeks/:id/correction` | SUPER_ADMIN only | `{ mode: "PUBLISHED", secret, reason }` — §24 scoped unlock: server-verified secret (`PNK_SUPER_ADMIN_SECRET` env; body-only, never logged/returned), selected week only, 30-min TTL grant, week remains PUBLISHED, no status downgrade, generic failure for wrong role/secret/state. Audited `PUBLISHED_SCHEDULE_UNLOCKED`; every correction after unlock is audited. LANGUAGE_MISMATCH stays impossible after unlock |
 
 `assertScheduleCorrectable` now gates every assignment mutation (create / change / replace / clear): DRAFT open; FINALIZED/PUBLISHED require an active correction/unlock grant held by the caller — the status column itself never changes through these paths (Invariants 6/7/8).
 

@@ -21,7 +21,7 @@ import {
   assertScheduleCorrectable,
   isScheduleCorrectionActive,
 } from "@/server/services/correction.service";
-import { createAssignment } from "@/server/services/assignment.service";
+import { createAssignment, changeAssignment } from "@/server/services/assignment.service";
 import { generateSchedule } from "@/server/services/scheduling.service";
 
 function actor(userId: string, roles: string[]): SessionUser {
@@ -242,6 +242,43 @@ describe("correction architecture — FINALIZED correction, SUPER_ADMIN PUBLISHE
         superAdmin,
       ),
     ).rejects.toThrow(/DISABLED/i);
+  });
+
+  it("E-2: holder corrects assignments during the open PUBLISHED window (OVERRIDE + audited); non-holders rejected; re-locks after end", async () => {
+    const week = await mkWeek(2096, 7, "PUBLISHED");
+    process.env.PNK_SUPER_ADMIN_SECRET = "correct-horse";
+    await beginPublishedCorrection(week.id, "correct-horse", "emergency fix", superAdmin);
+
+    // Seed one AUTO assignment on a FILIPINO dako for the holder to correct.
+    const filDako2 = await mkDako("ILGD-9904", "FILIPINO");
+    const autoTeacher = await mkTeacher("PNK-G-9903", "FILIPINO");
+    const seedRow = (
+      await db
+        .insert(schema.assignments)
+        .values({ weekId: week.id, dakoId: filDako2.id, teacherId: autoTeacher.id, assignmentType: "SUGO", assignmentSource: "AUTO" })
+        .returning()
+    )[0]!;
+
+    // Holder correction via changeAssignment → source OVERRIDE, audited.
+    const replacement = await mkTeacher("PNK-G-9904", "FILIPINO");
+    await changeAssignment(seedRow.id, { teacherId: replacement.id, reason: "SUPER_ADMIN emergency correction" }, superAdmin);
+    const rows = await db.select().from(schema.assignments).where(eq(schema.assignments.id, seedRow.id));
+    expect(rows[0]!.assignmentSource).toBe("OVERRIDE");
+    expect(rows[0]!.isOverride).toBe(true);
+    expect(rows[0]!.teacherId).toBe(replacement.id);
+    const audits = await db
+      .select()
+      .from(schema.auditLogs)
+      .where(eq(schema.auditLogs.entityId, seedRow.id));
+    expect(audits.map((a) => a.action)).toContain("MANUAL_ASSIGNMENT_OVERRIDE");
+
+    // Non-holders cannot write even while the window is open.
+    await expect(assertScheduleCorrectable(db, week.id, sched)).rejects.toThrow(/held by another user/);
+
+    // Ending re-locks: further writes require a new window; week still PUBLISHED.
+    await endScheduleCorrection(week.id, superAdmin);
+    await expect(assertScheduleCorrectable(db, week.id, superAdmin)).rejects.toThrow(/authorized correction window/);
+    expect((await db.select().from(schema.weeks).where(eq(schema.weeks.id, week.id)))[0]!.status).toBe("PUBLISHED");
   });
 
   it("E-2: empty reason rejected; end re-locks; PUBLISHED stays PUBLISHED throughout", async () => {
