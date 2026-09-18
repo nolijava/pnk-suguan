@@ -113,7 +113,7 @@ function anniversaryMessage(type: string, name: string): string {
   }
 }
 
-/** Scan helper the future notifier will call daily. Not scheduled yet (§28). */
+/** Scan helper the Phase 8 notifier calls every ~6h. */
 export async function dueAnniversaryNotifications(now: Date = new Date()) {
   const rows = await getDb().select().from(dako).where(eq(dako.status, "ACTIVE"));
   return rows
@@ -125,4 +125,25 @@ export async function dueAnniversaryNotifications(now: Date = new Date()) {
       stage: r.stage as NonNullable<typeof r.stage>,
       anniversaryYear: nextAnniversary(r.dako.dateEstablished, now).anniversaryYear,
     }));
+}
+
+/**
+ * Phase 8 — one idempotent notifier pass: scan due anniversary stages and
+ * run each through the existing dedupe/fan-out service. Safe to call any
+ * number of times (unique index on dako+year+type makes repeats no-ops);
+ * a restart/downtime self-heals on the next scan. Returns a small summary
+ * for the instrumentation log and the ADMIN scan endpoint.
+ */
+export async function runDueAnniversaryScan(now: Date = new Date()): Promise<{
+  scannedDakos: number;
+  dueStages: number;
+  createdNotifications: number;
+}> {
+  const due = await dueAnniversaryNotifications(now);
+  let createdNotifications = 0;
+  for (const d of due) {
+    const res = await recordDakoAnniversaryNotification(d.dakoId, d.anniversaryYear, d.stage);
+    createdNotifications += res.notifications;
+  }
+  return { scannedDakos: due.length, dueStages: due.length, createdNotifications };
 }

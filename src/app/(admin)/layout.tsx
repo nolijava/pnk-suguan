@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/server/auth/guard";
 import { logout } from "@/server/auth/auth.service";
 import { SESSION_COOKIE } from "@/server/auth/session";
+import { hasPermission } from "@/server/auth/permissions";
 import { cookies } from "next/headers";
+import { NotificationBell } from "./_components/notification-bell";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   let user;
@@ -32,6 +34,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <a href="/availability">Availability</a>
         <a href="/schedule">Schedule</a>
         <a href="/historical">Historical</a>
+        <a href="/reports">Reports</a>
+        {hasPermission(user.roleCodes, "notifications.read") ? <NotificationBell /> : null}
         {user.roleCodes.includes("ADMIN") ? <a href="/audit-logs">Audit</a> : null}
         <span style={{ marginLeft: "auto", color: "#555", fontSize: 13 }}>
           {user.email} [{user.roleCodes.join(", ")}]

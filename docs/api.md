@@ -215,3 +215,43 @@ The annual tables now show a distinct **HISTORICAL** badge (visually separate fr
 `NOT_FOUND` (404) · `CONFLICT` (409, e.g. duplicate code, already inactive/disabled, slot
 filled, week finalized, historical/normal-cycle mixing) · `HISTORICAL_WEEK` (409, workflow
 separation) · `NOT_IMPLEMENTED` (501) · `INTERNAL` (500).
+
+## Phase 8 — Reports + Dashboard + Notifications
+
+Read-only reporting and the notification delivery/UI layer. **No migration, no schema change, no new
+roles/permissions**; every new surface enforces existing RBAC server-side.
+
+### Reports (all `reports.read` — ADMIN/SCHEDULER/VIEWER; SUPER_ADMIN inherits)
+
+Server-rendered pages calling `src/server/services/reports.service.ts` (pure SELECT, set-based, no N+1,
+never auto-creates weeks, HISTORICAL source preserved verbatim):
+
+| Page | Contents |
+|---|---|
+| `/reports` | Index + current-year **source summary** (AUTO/MANUAL/OVERRIDE/HISTORICAL × SUGO/RESERBA/RESERBA II cross-tab) |
+| `/reports/annual?year=&type=SUGO\|RESERBA\|RESERBA_II` | Annual type report: per-Dako rows (teacher, week, status, source, assignedAt) + summary (total, bySource, dako/week coverage) |
+| `/reports/weekly?year=&week=` | Weekly report with A. SUGO / B. RESERBA / C. RESERBA II sections; unassigned reason codes come from the engine's read-only preview; not-started weeks are reported (never created) |
+| `/reports/teacher?teacherId=&year=&source=&type=` | Teacher assignment history (name, **code for internal admin view only**, type, dako, week/year, source, assignedAt) |
+| `/reports/dako?dakoId=&year=&source=&type=` | Dako assignment history |
+
+### Anniversary notification delivery (approved in-process mechanism)
+
+`src/instrumentation.ts` — ONE application-level timer (~every 6 hours, module-level guard against
+duplicate timers during dev/HMR) calling `NotificationService.runDueAnniversaryScan()`, which reuses the
+existing `dueAnniversaryNotifications()` + `recordDakoAnniversaryNotification()` unchanged. Idempotency is
+authoritative in the existing `(dako, anniversaryYear, notificationType)` unique index: repeated scans are
+no-ops and downtime self-heals on the next tick. Existing UTC `anniversaryStage`/`nextAnniversary` logic
+untouched. Notifications never trigger any scheduling action.
+
+| Endpoint | Permission | Behavior |
+|---|---|---|
+| POST | `/api/notifications/scan` | `notifications.write` (ADMIN) — runs the SAME idempotent scan on demand; returns `{ scannedDakos, dueStages, createdNotifications }` |
+
+### Notification bell (all roles with `notifications.read`)
+
+`_components/notification-bell.tsx` in the admin header: unread count, dropdown panel (title, message,
+category label, relative timestamp), mark-as-read **owned rows only** via the existing `POST
+/api/notifications`, navigation by `relatedEntityType` (`dako` → `/dako/[id]`, `week` → `/schedule`).
+
+Tests: `tests/int/phase8.test.ts` — report fidelity/filters/source preservation, read-only proof, notifier
+stage windows, scan idempotence, ADMIN-only fan-out, mark-read ownership, navigation mapping.
