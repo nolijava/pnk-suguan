@@ -600,6 +600,10 @@ form.card, .card {
 .badge-updated { background: var(--accent-solid); color: #fff; }
 .badge-historical { background: var(--gold-soft); color: var(--gold-text); border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); }
 
+/* Phase 10 — user management table */
+.data-table .actions-col { width: 1%; white-space: nowrap; }
+.data-table td[data-label] { font-size: 13.5px; }
+
 /* ============================================================ */
 /* 9. Tables                                                    */
 /* ============================================================ */

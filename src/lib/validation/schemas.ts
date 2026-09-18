@@ -149,6 +149,46 @@ export const userCreateSchema = z.object({
   roleCode: z.enum(["ADMIN", "SCHEDULER", "VIEWER"]),
 }).strict();
 
+// Phase 10 — user management (ADMIN-only, users.manage). SUPER_ADMIN is
+// deliberately absent from every assignable-role enum: it is the emergency
+// PUBLISHED-unlock role and is never part of normal account administration.
+export const userUpdateSchema = z
+  .object({
+    action: z.literal("profile"),
+    fullName: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+export const userRoleChangeSchema = z
+  .object({
+    action: z.literal("role"),
+    roleCode: z.enum(["ADMIN", "SCHEDULER", "VIEWER"]),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+export const userStatusChangeSchema = z
+  .object({
+    action: z.literal("status"),
+    status: userStatusSchema,
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+export const userPatchSchema = z.discriminatedUnion("action", [
+  userUpdateSchema,
+  userRoleChangeSchema,
+  userStatusChangeSchema,
+]);
+
+export const userResetPasswordSchema = z.object({}).strict();
+
+export const userListQuerySchema = z.object({
+  q: z.string().trim().max(200).optional(),
+  role: z.enum(["ADMIN", "SCHEDULER", "VIEWER", "SUPER_ADMIN"]).optional(),
+  status: userStatusSchema.optional(),
+});
+
 export const notificationReadSchema = z.object({
   notificationIds: z.array(z.string().uuid()).min(1),
 }).strict();

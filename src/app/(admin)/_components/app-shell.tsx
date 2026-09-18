@@ -68,6 +68,14 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="m9 12 2 2 4-4" />
     </svg>
   ),
+  users: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8.5" cy="8.5" r="3" />
+      <path d="M3 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5" />
+      <circle cx="17" cy="9.5" r="2.4" />
+      <path d="M16 15.2c2.7.3 4.5 2.1 4.5 4.8" />
+    </svg>
+  ),
   collapse: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M14.5 6.5 9 12l5.5 5.5" />
@@ -99,6 +107,7 @@ const PAGE_TITLES: Array<[string, string, string]> = [
   ["/historical", "Historical Backfill", "Pre-go-live assignment encoding"],
   ["/reports", "Reports", "Read-only operational reports"],
   ["/audit-logs", "Audit Log", "Administrative action history"],
+  ["/users", "User Management", "Accounts, roles, and access"],
 ];
 
 export interface ShellNavItem {

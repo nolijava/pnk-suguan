@@ -37,6 +37,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: "/historical", label: "Historical", icon: "historical" },
     { href: "/reports", label: "Reports", icon: "reports" },
   ];
+  if (hasPermission(user.roleCodes, "users.manage")) {
+    navItems.push({ href: "/users", label: "Users", icon: "users" });
+  }
   if (user.roleCodes.includes("ADMIN")) {
     navItems.push({ href: "/audit-logs", label: "Audit", icon: "audit" });
   }
