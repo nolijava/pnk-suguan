@@ -9,51 +9,79 @@
  */
 
 /* ============================================================ */
-/* 1. Tokens — PNK brand + semantic roles                       */
+/* 1. Tokens — palette + semantic roles                         */
 /* ============================================================ */
+/* The UI color system is deliberately INDEPENDENT of the PNK logo:
+   no value below is sampled from the logo, and nothing here recolors
+   it. `--blue/gold/emerald/red/amber-*` are the authored primitives;
+   components always read the semantic tokens, never the primitives. */
 :root {
-  /* PNK identity */
-  --pnk-blue: #1e4fa3;
-  --pnk-blue-strong: #16407f;
-  --pnk-navy: #0f1b2d;
-  --pnk-gold: #c9971c;
-  --pnk-green: #1c7a4d;
-  --pnk-red: #b3261e;
+  /* primitives */
+  --blue-500: #3b82f6;
+  --blue-600: #2563eb;
+  --blue-400: #60a5fa;
+  --gold-500: #c9a227;
+  --gold-text-500: #7e6210;
+  --emerald-500: #2f8f6b;
+  --emerald-text-500: #1f7355;
+  --red-500: #c94c4c;
+  --red-solid-500: #c94c4c;
+  --red-text-500: #b84040;
+  --amber-text-500: #8a5a14;
+  --navy-900: #172033;
+  --navy-950: #0f172a;
 
   /* structural surfaces — Sacred Minimal (warm ivory) */
-  --bg: #f7f5f0;
-  --bg-tint: radial-gradient(1200px 620px at 12% -10%, rgba(30, 79, 163, 0.07), transparent 60%),
-    radial-gradient(900px 520px at 100% 0%, rgba(201, 151, 28, 0.06), transparent 55%);
+  --bg: #f7f6f2;
+  --bg-tint: radial-gradient(1200px 620px at 12% -10%, rgba(59, 130, 246, 0.07), transparent 60%),
+    radial-gradient(900px 520px at 100% 0%, rgba(201, 162, 39, 0.06), transparent 55%);
   --surface: #ffffff;
-  --surface-2: #fbfaf7;
-  --surface-3: #f3f1ea;
+  --surface-2: #f0efea;
+  --surface-3: #eae7df;
   --glass: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(15, 27, 45, 0.08);
-  --paper: #fcf8ef;
-  --paper-border: #e8dfcc;
+  --glass-border: rgba(255, 255, 255, 0.55);
 
-  /* typography */
-  --text: #16202e;
-  --text-muted: #5b6675;
+  /* Paper & Archive (destination history) */
+  --paper: #fffdf7;
+  --paper-border: #ddd6c7;
+  --paper-bg: #f4f1e8;
+  --paper-text: #263044;
+  --paper-accent: #b8942e;
+
+  /* modal / drawer backdrop */
+  --scrim: rgba(15, 23, 42, 0.46);
+
+  /* typography — the authored secondary text (#667085) measures 4.03–4.32
+     against the secondary surfaces, so it is nudged 4% darker to clear AA on
+     every light surface. --text-faint stays the decorative micro-label tier. */
+  --text: var(--navy-900);
+  --text-muted: #5f6878;
   --text-faint: #8a93a1;
 
   /* lines */
-  --border: #e3ded4;
-  --border-strong: #cec7b8;
+  --border: #e4e2dc;
+  --border-strong: #d3d0c8;
 
-  /* semantic roles */
-  --accent: var(--pnk-blue);
-  --accent-hover: var(--pnk-blue-strong);
-  --accent-soft: rgba(30, 79, 163, 0.1);
-  --accent-ring: rgba(30, 79, 163, 0.32);
-  --gold: var(--pnk-gold);
-  --gold-soft: rgba(201, 151, 28, 0.14);
-  --success: var(--pnk-green);
-  --success-soft: rgba(28, 122, 77, 0.12);
-  --danger: var(--pnk-red);
-  --danger-soft: rgba(179, 38, 30, 0.1);
-  --warning: #92610a;
-  --warning-soft: rgba(201, 151, 28, 0.16);
+  /* semantic roles — blue = interaction, emerald = success/active,
+     gold = highlight/archive, red = error/destructive, amber = warning */
+  --accent: var(--blue-500);
+  --accent-hover: var(--blue-600);
+  --link: var(--blue-600);         /* text-safe blue: links, active nav */
+  --accent-solid: var(--blue-600); /* filled blue that carries white text */
+  --accent-soft: rgba(59, 130, 246, 0.1);
+  --accent-ring: rgba(59, 130, 246, 0.32);
+  --gold: var(--gold-500);
+  --gold-text: var(--gold-text-500);
+  --gold-soft: rgba(201, 162, 39, 0.14);
+  --success: var(--emerald-500);
+  --success-text: var(--emerald-text-500);
+  --success-soft: rgba(47, 143, 107, 0.12);
+  --danger: var(--red-500);
+  --danger-text: var(--red-text-500);
+  --danger-solid: var(--red-solid-500);
+  --danger-soft: rgba(201, 76, 76, 0.1);
+  --warning: var(--amber-text-500);
+  --warning-soft: rgba(197, 138, 36, 0.14);
 
   /* geometry */
   --radius: 10px;
@@ -73,11 +101,13 @@
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 
-  /* primary button surface (kept deep enough for white text in BOTH themes;
-     --accent itself is tuned per theme for text/links on the page surface) */
-  --btn-bg: #1e4fa3;
-  --btn-bg-hover: #1c5bb8;
+  /* Primary button — the rest fill keeps AA contrast with its white label
+     (5.17:1); the brighter hover fill (#3b82f6) carries a navy label (4.85:1).
+     No state uses a combination that drops below WCAG AA. */
+  --btn-bg: var(--blue-600);
+  --btn-bg-hover: var(--blue-500);
   --btn-fg: #ffffff;
+  --btn-fg-hover: var(--navy-950);
 
   /* shell */
   --sidebar-w: 250px;
@@ -87,48 +117,61 @@
 }
 
 [data-theme="dark"] {
-  --bg: #0b1220;
-  --bg-tint: radial-gradient(1200px 620px at 10% -12%, rgba(111, 155, 255, 0.12), transparent 60%),
-    radial-gradient(900px 520px at 100% 0%, rgba(76, 195, 138, 0.08), transparent 58%);
-  --surface: #121b2e;
-  --surface-2: #162034;
-  --surface-3: #1b273d;
-  --glass: rgba(21, 32, 52, 0.72);
+  --bg: #0f172a;
+  --bg-tint: radial-gradient(1200px 620px at 10% -12%, rgba(59, 130, 246, 0.14), transparent 60%),
+    radial-gradient(900px 520px at 100% 0%, rgba(52, 160, 120, 0.08), transparent 58%);
+  --surface: var(--navy-900);
+  --surface-2: #1e293b;
+  --surface-3: #243047;
+  --glass: rgba(30, 41, 59, 0.62);
   --glass-border: rgba(148, 163, 184, 0.16);
-  --paper: #141d30;
-  --paper-border: #26344e;
+  --paper: #202a3d;
+  --paper-border: #3a4354;
+  --paper-bg: #18202f;
+  --paper-text: #f8fafc;
+  --paper-accent: #c9a227;
+  --scrim: rgba(2, 6, 18, 0.62);
 
-  --text: #eef2f8;
-  --text-muted: #a6b2c3;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
   --text-faint: #7d8a9d;
 
-  --border: #22304a;
-  --border-strong: #33456a;
+  --border: #334155;
+  --border-strong: #45556e;
 
-  --accent: #6f9bff;
-  --accent-hover: #8fb2ff;
-  --accent-soft: rgba(111, 155, 255, 0.16);
-  --accent-ring: rgba(111, 155, 255, 0.4);
-  --gold: #e0b23c;
-  --gold-soft: rgba(224, 178, 60, 0.16);
-  --success: #4cc38a;
-  --success-soft: rgba(76, 195, 138, 0.16);
-  --danger: #f0705f;
-  --danger-soft: rgba(240, 112, 95, 0.15);
-  --warning: #e0b23c;
-  --warning-soft: rgba(224, 178, 60, 0.16);
+  --accent: var(--blue-500);
+  --accent-hover: var(--blue-400);
+  --link: var(--blue-400);
+  --accent-solid: var(--blue-600);
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --accent-ring: rgba(59, 130, 246, 0.42);
+  --gold: #d4af37;
+  --gold-text: #d4af37;
+  --gold-soft: rgba(212, 175, 55, 0.16);
+  --success: #34a078;
+  --success-text: #4cbe90;
+  --success-soft: rgba(52, 160, 120, 0.16);
+  --danger: #e06a6a;
+  /* text-safe variants: the specified fills are darker than the previous
+     palette, so label colors are tuned against their tinted soft surfaces */
+  --danger-text: #ee8080;
+  --danger-solid: #b93b3b;
+  --danger-soft: rgba(224, 106, 106, 0.15);
+  --warning: #d6a23a;
+  --warning-soft: rgba(214, 162, 58, 0.16);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
   --shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 22px 48px rgba(0, 0, 0, 0.55);
-  /* deeper primary surface so white button text keeps AA contrast on dark UI */
-  --btn-bg: #2f5fd0;
-  --btn-bg-hover: #3a6fe0;
+  /* same AA-safe button pair as light mode */
+  --btn-bg: var(--blue-600);
+  --btn-bg-hover: var(--blue-500);
   --btn-fg: #ffffff;
+  --btn-fg-hover: var(--navy-950);
   color-scheme: dark;
 }
 
-@property --pnk-angle {
+@property --ring-angle {
   syntax: "<angle>";
   initial-value: 0deg;
   inherits: false;
@@ -161,7 +204,7 @@ h1, h2, h3, h4 {
 h1 { font-size: 21px; margin: 0 0 4px; }
 h2 { font-size: 16.5px; margin: 16px 0 8px; }
 h3 { font-size: 15.5px; }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 ::selection { background: var(--accent-soft); }
@@ -181,7 +224,7 @@ a:hover { text-decoration: underline; }
 /* ============================================================ */
 /* 3. Motion system (shared keyframes + utilities)              */
 /* ============================================================ */
-@keyframes pnk-rotate { to { --pnk-angle: 360deg; } }
+@keyframes pnk-rotate { to { --ring-angle: 360deg; } }
 @keyframes pnk-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes pnk-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pnk-pop { from { opacity: 0; transform: translateY(6px) scale(0.96); } to { opacity: 1; transform: none; } }
@@ -239,7 +282,7 @@ label { color: var(--text-muted); }
     background-color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
-.btn:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; box-shadow: var(--shadow-sm); }
+.btn:hover { border-color: var(--accent); color: var(--link); text-decoration: none; box-shadow: var(--shadow-sm); }
 .btn:active { transform: scale(0.975); }
 
 /* Primary — gradient bloom + single light sweep + rotating PNK border on hover */
@@ -256,7 +299,7 @@ label { color: var(--text-muted); }
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
 }
 .btn-primary:hover {
-  color: var(--btn-fg);
+  color: var(--btn-fg-hover);
   border-color: transparent;
   background-image: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.26) 50%, transparent 62%),
     linear-gradient(135deg, var(--btn-bg-hover), color-mix(in srgb, var(--btn-bg-hover) 72%, var(--success)));
@@ -272,8 +315,8 @@ label { color: var(--text-muted); }
   content: ""; position: absolute; inset: -2px; z-index: -1; pointer-events: none;
   border-radius: calc(var(--radius-sm) + 2px);
   padding: 2px;
-  background: conic-gradient(from var(--pnk-angle),
-    var(--pnk-blue), #2fb6c9, var(--pnk-gold), var(--pnk-green), var(--pnk-blue));
+  background: conic-gradient(from var(--ring-angle),
+    var(--blue-500), var(--emerald-500), var(--gold-500), var(--blue-500));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -285,10 +328,10 @@ label { color: var(--text-muted); }
 .btn-primary:not([disabled]):focus-visible::after { opacity: 0.85; animation: pnk-rotate 3s linear infinite; }
 
 .btn-secondary { background: var(--glass); border-color: var(--border); color: var(--text); }
-.btn-secondary:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+.btn-secondary:hover { background: var(--surface); border-color: var(--accent); color: var(--link); transform: translateY(-1px); }
 
-.btn-danger { background: var(--surface); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
-.btn-danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.btn-danger { background: var(--surface); color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.btn-danger:hover { background: var(--danger-soft); color: var(--danger-text); border-color: var(--danger); }
 
 .btn-ghost, .ghost {
   background: transparent; border-color: transparent; color: var(--text-muted);
@@ -299,7 +342,7 @@ label { color: var(--text-muted); }
 .btn[disabled], button[disabled] { opacity: 0.55; cursor: not-allowed; transform: none; }
 .btn[disabled]::after { display: none; }
 
-.link-btn { background: none; border: none; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; padding: 0; }
+.link-btn { background: none; border: none; color: var(--link); cursor: pointer; text-decoration: underline; font: inherit; padding: 0; }
 
 /* ============================================================ */
 /* 6. Application shell (sidebar + topbar)                      */
@@ -327,7 +370,7 @@ label { color: var(--text-muted); }
 .brand-mark {
   width: 36px; height: 36px; flex: 0 0 36px; border-radius: 10px;
   display: grid; place-items: center;
-  background: linear-gradient(140deg, var(--pnk-blue), #2b6bd6 55%, var(--pnk-gold));
+  background: linear-gradient(140deg, var(--blue-500), var(--blue-600) 55%, var(--gold-500));
   color: #fff; font-family: var(--font-display, system-ui); font-weight: 700; font-size: 13px;
   letter-spacing: 0.02em;
   box-shadow: 0 4px 12px var(--accent-soft);
@@ -365,7 +408,7 @@ label { color: var(--text-muted); }
 .nav-item:hover svg { transform: translateX(2px); }
 .nav-item svg { transition: transform var(--dur-normal) var(--ease-out); }
 .nav-item[aria-current="page"] {
-  color: var(--accent); font-weight: 600;
+  color: var(--link); font-weight: 600;
   background: linear-gradient(96deg, var(--accent-soft), transparent 85%);
   border-color: color-mix(in srgb, var(--accent) 22%, transparent);
 }
@@ -418,7 +461,7 @@ label { color: var(--text-muted); }
   border-radius: 9px; border: 1px solid var(--border); background: var(--surface);
   color: var(--text-muted); cursor: pointer; position: relative;
 }
-.icon-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--surface); }
+.icon-btn:hover { color: var(--link); border-color: var(--accent); background: var(--surface); }
 .icon-btn svg { width: 17px; height: 17px; }
 .user-chip {
   display: flex; align-items: center; gap: 9px; padding: 5px 10px 5px 6px;
@@ -437,7 +480,7 @@ label { color: var(--text-muted); }
 .content { padding: 20px; width: 100%; max-width: 1460px; margin: 0 auto; }
 .mobile-only { display: none; }
 .drawer-backdrop {
-  position: fixed; inset: 0; background: rgba(11, 18, 32, 0.5); z-index: 40;
+  position: fixed; inset: 0; background: var(--scrim); z-index: 40;
   animation: pnk-fade-in var(--dur-fast) var(--ease-out) both;
   backdrop-filter: blur(2px);
 }
@@ -445,7 +488,7 @@ label { color: var(--text-muted); }
 /* Legacy top nav (kept: still styled if used anywhere) */
 nav { display: flex; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; }
 nav a { color: var(--text); text-decoration: none; font-size: 14px; }
-nav a:hover { color: var(--accent); }
+nav a:hover { color: var(--link); }
 main { padding: 16px; max-width: 1200px; margin: 0 auto; }
 
 /* ============================================================ */
@@ -466,8 +509,8 @@ main { padding: 16px; max-width: 1200px; margin: 0 auto; }
   border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2);
   font-size: 12px; font-weight: 600; color: var(--text-muted);
 }
-.chip-accent { border-color: color-mix(in srgb, var(--accent) 30%, transparent); background: var(--accent-soft); color: var(--accent); }
-.chip-gold { border-color: color-mix(in srgb, var(--gold) 36%, transparent); background: var(--gold-soft); color: var(--warning); }
+.chip-accent { border-color: color-mix(in srgb, var(--accent) 30%, transparent); background: var(--accent-soft); color: var(--link); }
+.chip-gold { border-color: color-mix(in srgb, var(--gold) 36%, transparent); background: var(--gold-soft); color: var(--gold-text); }
 
 .toolbar {
   display: flex; gap: 10px; flex-wrap: wrap; align-items: end;
@@ -531,7 +574,7 @@ form.card, .card {
 
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-muted); font-weight: 550; }
-.field span em { color: var(--danger); font-style: normal; }
+.field span em { color: var(--danger-text); font-style: normal; }
 .field input, .field select, .field textarea { font-weight: 400; }
 .form-span { grid-column: 1 / -1; }
 
@@ -548,14 +591,14 @@ form.card, .card {
   border-radius: 999px; font-size: 11.5px; font-weight: 650; letter-spacing: 0.02em;
   border: 1px solid transparent; white-space: nowrap;
 }
-.badge-green { background: var(--success-soft); color: var(--success); border-color: color-mix(in srgb, var(--success) 34%, transparent); }
+.badge-green { background: var(--success-soft); color: var(--success-text); border-color: color-mix(in srgb, var(--success) 34%, transparent); }
 .badge-gray { background: var(--surface-3); color: var(--text-muted); border-color: var(--border); }
-.badge-blue { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 32%, transparent); }
+.badge-blue { background: var(--accent-soft); color: var(--link); border-color: color-mix(in srgb, var(--accent) 32%, transparent); }
 .badge-amber { background: var(--gold-soft); color: var(--warning); border-color: color-mix(in srgb, var(--gold) 38%, transparent); }
-.badge-red { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 34%, transparent); }
-.badge-absent { background: var(--danger); color: #fff; }
-.badge-updated { background: var(--accent); color: #fff; }
-.badge-historical { background: var(--gold-soft); color: var(--warning); border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); }
+.badge-red { background: var(--danger-soft); color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 34%, transparent); }
+.badge-absent { background: var(--danger-solid); color: #fff; }
+.badge-updated { background: var(--accent-solid); color: #fff; }
+.badge-historical { background: var(--gold-soft); color: var(--gold-text); border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); }
 
 /* ============================================================ */
 /* 9. Tables                                                    */
@@ -576,8 +619,8 @@ tbody tr { transition: background-color var(--dur-fast) var(--ease-out); }
 tbody tr:hover { background: var(--surface-2); }
 tbody tr:last-child td { border-bottom: none; }
 .sort-link { color: inherit; text-decoration: none; }
-.sort-link:hover { color: var(--accent); }
-.sort-arrow { color: var(--accent); }
+.sort-link:hover { color: var(--link); }
+.sort-arrow { color: var(--link); }
 .empty-state { text-align: center; color: var(--text-muted); padding: 30px 12px; }
 .page-info { display: flex; gap: 6px; align-items: center; margin: 12px 0; color: var(--text-muted); font-size: 13.5px; flex-wrap: wrap; }
 
@@ -585,7 +628,7 @@ tbody tr:last-child td { border-bottom: none; }
 /* 10. Modals / dialogs                                         */
 /* ============================================================ */
 .modal-backdrop {
-  position: fixed; inset: 0; background: rgba(11, 18, 32, 0.5);
+  position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: center; justify-content: center; z-index: 50;
   animation: pnk-fade-in var(--dur-fast) var(--ease-out) both;
   backdrop-filter: blur(3px);
@@ -604,11 +647,11 @@ tbody tr:last-child td { border-bottom: none; }
 /* 11. Notices / states (severity-aware presentation)           */
 /* ============================================================ */
 .notice, .success-note, .error, .info-note, .lock-banner, .state-card { animation: pnk-fade-up var(--dur-normal) var(--ease-out) both; }
-.notice { color: var(--success); }
-.error { color: var(--danger); font-weight: 550; }
+.notice { color: var(--success-text); }
+.error { color: var(--danger-text); font-weight: 550; }
 .info-note { color: var(--text-muted); font-size: 13.5px; }
 .success-note {
-  color: var(--success); background: var(--success-soft);
+  color: var(--success-text); background: var(--success-soft);
   border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
   border-radius: var(--radius); padding: 9px 12px;
 }
@@ -616,11 +659,11 @@ tbody tr:last-child td { border-bottom: none; }
   background: var(--surface); border: 1px dashed var(--border);
   border-radius: var(--radius); padding: 26px; text-align: center; color: var(--text-muted);
 }
-.state-error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); color: var(--danger); background: var(--danger-soft); }
+.state-error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); color: var(--danger-text); background: var(--danger-soft); }
 
 /* Error notice — persists until resolved (never auto-hidden) */
 .error-note {
-  color: var(--danger); background: var(--danger-soft);
+  color: var(--danger-text); background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
   border-radius: var(--radius); padding: 9px 12px; font-weight: 550;
   animation: pnk-fade-up var(--dur-normal) var(--ease-out) both;
@@ -673,22 +716,24 @@ tbody tr:last-child td { border-bottom: none; }
 .archive-list { position: relative; padding-left: 24px; }
 .archive-list::before {
   content: ""; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px;
-  background: linear-gradient(var(--gold), var(--paper-border));
+  background: linear-gradient(var(--paper-accent), var(--paper-border));
   transform-origin: top; border-radius: 2px;
   animation: pnk-draw var(--dur-slow) var(--ease-out) both;
 }
 .archive-item {
   position: relative; margin-bottom: 10px; padding: 11px 13px;
-  background: var(--paper); border: 1px solid var(--paper-border);
+  background: var(--paper); border: 1px solid var(--paper-border); color: var(--paper-text);
   border-radius: var(--radius-sm);
   animation: pnk-fade-up var(--dur-smooth) var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 55ms);
   transition: transform var(--dur-normal) var(--ease-out), box-shadow var(--dur-normal) var(--ease-out);
 }
-.archive-item:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+/* the archive tint is applied on hover: the section container itself has no
+   padding of its own and this refinement must not change spacing */
+.archive-item:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); background: var(--paper-bg); }
 .archive-item::before {
   content: ""; position: absolute; left: -22px; top: 16px; width: 10px; height: 10px;
-  border-radius: 50%; background: var(--surface); border: 2px solid var(--gold);
+  border-radius: 50%; background: var(--surface); border: 2px solid var(--paper-accent);
 }
 .archive-item[data-active="true"]::before { background: var(--success); border-color: var(--success); }
 .archive-item[data-active="true"] { border-color: color-mix(in srgb, var(--success) 30%, var(--paper-border)); }
@@ -882,7 +927,7 @@ tbody tr:last-child td { border-bottom: none; }
 .bell-item-meta { font-size: 11px; color: var(--text-faint); margin-top: 4px; display: flex; gap: 8px; align-items: center; }
 .bell-count {
   position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px;
-  border-radius: 999px; background: var(--danger); color: #fff; font-size: 10.5px;
+  border-radius: 999px; background: var(--danger-solid); color: #fff; font-size: 10.5px;
   font-weight: 700; display: grid; place-items: center; border: 2px solid var(--surface);
 }
 
