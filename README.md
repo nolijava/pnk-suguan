@@ -17,7 +17,7 @@ Scheduling and administrative system for PNK (Pagkakaisa ng mga Kabataan) dako w
 - `PUBLISHED` weeks are immutable; the only correction path is the audited, time-boxed, week-scoped SUPER_ADMIN unlock (secret via `PNK_SUPER_ADMIN_SECRET`, timing-safe compared, never logged).
 - Unexpected server errors return a fixed generic body; internal details stay in server logs only.
 - Login throttling: capped exponential per-account + per-IP backoff, uniform failure message (no account enumeration).
-- Security headers (CSP with `frame-ancestors 'none'`, X-Frame-Options DENY, nosniff, Referrer-Policy) on every response.
+- Security headers (CSP with `frame-ancestors 'none'`; `unsafe-eval` is dev-only — excluded in production, required by Next.js/React dev mode, X-Frame-Options DENY, nosniff, Referrer-Policy) on every response.
 - Assignment history is append-only (DB trigger guard); reports, dashboards, PDF, and notifications are strictly read-only with respect to scheduling data.
 
 ## Running

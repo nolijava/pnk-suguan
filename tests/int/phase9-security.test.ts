@@ -40,7 +40,7 @@ import { login } from "@/server/auth/auth.service";
 import { createAssignment, changeAssignment } from "@/server/services/assignment.service";
 import { beginFinalizedCorrection } from "@/server/services/correction.service";
 import { markNotificationsRead } from "@/server/services/notification.service";
-import nextConfig from "../../next.config";
+import nextConfig, { securityHeadersFor } from "../../next.config";
 
 function actor(userId: string, roles: string[]): SessionUser {
   return {
@@ -424,7 +424,21 @@ describe("Phase 9 — security headers configuration", () => {
     const csp = get("Content-Security-Policy")!;
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).not.toContain("unsafe-eval");
+    // Dev-only relaxation: vitest runs with NODE_ENV=test, so the dev branch
+    // applies and React/Next.js dev-mode eval() is permitted.
+    expect(csp).toContain("unsafe-eval");
+    expect(csp).toMatch(/script-src 'self' 'unsafe-inline' 'unsafe-eval'/);
+  });
+
+  it("excludes 'unsafe-eval' from the CSP for production while keeping it in dev", () => {
+    const findCsp = (rows: Array<{ key: string; value: string }>) =>
+      rows.find((h) => h.key === "Content-Security-Policy")!.value;
+    const prod = findCsp(securityHeadersFor(false));
+    const dev = findCsp(securityHeadersFor(true));
+    expect(prod).not.toContain("unsafe-eval");
+    expect(prod).toMatch(/script-src 'self' 'unsafe-inline';/);
+    expect(dev).toContain("unsafe-eval");
+    expect(prod).toContain("frame-ancestors 'none'");
   });
 });
 
