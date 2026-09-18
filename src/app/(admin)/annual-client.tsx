@@ -289,6 +289,72 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
       delete t.dataset.hotCol;
     });
   }
+  /* ---------------------------------------------------------------- */
+  /* Cell tooltip — body-level layer (approved fix): the old in-cell
+     tooltip was trapped by .annual-scroll's overflow clipping AND by the
+     pnk-pulse opacity stacking context on current-week <td>s. The layer
+     lives on document.body (above sticky columns and every cell), is
+     driven imperatively from the section's mouse/focus handlers so the
+     53-week matrix never re-renders on hover, repositions below the cell
+     (flip above near the viewport bottom) with an 8px gutter, and hides
+     on scroll/resize so it can never detach from its cell. */
+  const tipRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const tip = document.createElement("div");
+    tip.className = "cell-tooltip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+    tipRef.current = tip;
+    const hide = () => {
+      tip.classList.remove("show");
+      tip.textContent = "";
+    };
+    window.addEventListener("resize", hide);
+    /* capture phase catches the .annual-scroll containers' own scrolling */
+    window.addEventListener("scroll", hide, true);
+    return () => {
+      window.removeEventListener("resize", hide);
+      window.removeEventListener("scroll", hide, true);
+      tip.remove();
+      tipRef.current = null;
+    };
+  }, []);
+
+  function showTipFor(trigger: HTMLElement) {
+    const tip = tipRef.current;
+    if (!tip) return;
+    const src = trigger.querySelector(":scope > .cell-info-src");
+    if (!src) {
+      hideTip();
+      return;
+    }
+    tip.textContent = src.textContent ?? "";
+    tip.style.width = "min(400px, 78vw)";
+    const rect = trigger.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const gutter = 8;
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    const x = Math.min(Math.max(gutter, rect.left), Math.max(gutter, vw - tw - gutter));
+    let y = rect.bottom + 6;
+    if (y + th + gutter > vh) y = rect.top - th - 6; /* flip above near bottom edge */
+    tip.style.left = `${Math.round(Math.max(gutter, x))}px`;
+    tip.style.top = `${Math.round(y)}px`;
+    tip.classList.add("show");
+  }
+
+  function hideTip() {
+    const tip = tipRef.current;
+    if (!tip) return;
+    tip.classList.remove("show");
+  }
+
+  function cellTrigger(target: EventTarget | null): HTMLElement | null {
+    return (target as HTMLElement | null)?.closest(".cell-btn, .cell-static") ?? null;
+  }
+
   function highlightColumn(week: number | null) {
     const root = sectionRef.current;
     if (!root) return;
@@ -316,15 +382,33 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
         const cell = (e.target as HTMLElement).closest("td") as HTMLTableCellElement | null;
         if (!cell || cell.cellIndex < 1) return;
         highlightColumn(cell.cellIndex);
+        const trigger = cellTrigger(e.target);
+        if (trigger) showTipFor(trigger);
+        else hideTip();
       }}
-      onMouseLeave={clearColumnHighlight}
+      onMouseOut={(e) => {
+        /* moving between children of the same trigger keeps the tooltip up */
+        const trigger = cellTrigger(e.target);
+        const to = e.relatedTarget as Node | null;
+        if (trigger && to && trigger.contains(to)) return;
+        hideTip();
+      }}
+      onMouseLeave={() => {
+        clearColumnHighlight();
+        hideTip();
+      }}
       onFocusCapture={(e) => {
         /* keyboard parity: focusing a cell highlights its column too */
         const cell = (e.target as HTMLElement).closest("td") as HTMLTableCellElement | null;
         if (!cell || cell.cellIndex < 1) return;
         highlightColumn(cell.cellIndex);
+        const trigger = cellTrigger(e.target);
+        if (trigger) showTipFor(trigger);
       }}
-      onBlurCapture={clearColumnHighlight}
+      onBlurCapture={() => {
+        clearColumnHighlight();
+        hideTip();
+      }}
     >
       <div className="annual-year-nav">
         <a className="btn btn-secondary" href={`/?year=${schedule.year - 1}`} aria-label={`Previous year ${schedule.year - 1}`}>
@@ -408,7 +492,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                                   {modified ? <UpdatedBadge /> : null}
                                   {absent ? <AbsentBadge /> : null}
                                   {absent || modified ? (
-                                    <span className="cell-info" role="note">
+                                    <span className="cell-info-src">
                                       {absent
                                         ? `${absent.teacherName} — ABSENT · Reason: ${absent.reason} · Week: ${weekLabel(i + 1)} · ${TYPE_LABEL[table.assignmentType]} · Recorded by: ${absent.actorName ?? "unknown"} · At: ${fmtDate(absent.at)}`
                                         : modified
@@ -424,7 +508,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                                   {modified ? <UpdatedBadge /> : null}
                                   {absent ? <AbsentBadge /> : null}
                                   {absent || modified ? (
-                                    <span className="cell-info" role="note">
+                                    <span className="cell-info-src">
                                       {absent
                                         ? `${absent.teacherName} — ABSENT · Reason: ${absent.reason} · Week: ${weekLabel(i + 1)} · ${TYPE_LABEL[table.assignmentType]} · Recorded by: ${absent.actorName ?? "unknown"} · At: ${fmtDate(absent.at)}`
                                         : modified
@@ -441,7 +525,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                               <span className="cell-static" tabIndex={0}>
                                 <span className="info-note">{absent.teacherName}</span>
                                 <AbsentBadge />
-                                <span className="cell-info" role="note">
+                                <span className="cell-info-src">
                                   {`${absent.teacherName} — ABSENT · Reason: ${absent.reason} · Week: ${weekLabel(i + 1)} · ${TYPE_LABEL[table.assignmentType]} · Recorded by: ${absent.actorName ?? "unknown"} · At: ${fmtDate(absent.at)}`}
                                 </span>
                               </span>
