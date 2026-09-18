@@ -107,6 +107,8 @@ export function ScheduleActions({
 }: ScheduleActionsProps) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  // True only while the generation request itself is in flight (real state).
+  const [generating, setGenerating] = useState(false);
   const [showAbsentWarning, setShowAbsentWarning] = useState(false);
   const [freshCount, setFreshCount] = useState(0);
 
@@ -236,6 +238,7 @@ export function ScheduleActions({
 
   function generate() {
     setMessage(null);
+    setGenerating(true);
     startTransition(async () => {
       try {
         const res = await fetch("/api/scheduling/generate", {
@@ -246,6 +249,7 @@ export function ScheduleActions({
         const body = await res.json();
         if (!res.ok) {
           setMessage({ kind: "error", text: body?.error?.message ?? "generation failed" });
+          setGenerating(false);
         } else {
           setMessage({
             kind: "success",
@@ -257,15 +261,19 @@ export function ScheduleActions({
         }
       } catch {
         setMessage({ kind: "error", text: "network error — generation not executed" });
+        setGenerating(false);
       }
     });
   }
 
   function onGenerateClick() {
     setMessage(null);
+    setGenerating(true);
     startTransition(async () => {
       const n = await refreshAbsenceCount();
       if (n > 0) {
+        // Waiting on the operator's decision — not a running operation.
+        setGenerating(false);
         setFreshCount(n);
         setShowAbsentWarning(true);
       } else {
@@ -496,8 +504,13 @@ export function ScheduleActions({
               </button>
           ) : null}
           {canGenerate && !locked ? (
-            <button type="button" className="btn btn-primary" onClick={onGenerateClick} disabled={pending}>
-              {rows.some((r) => r.source === "AUTO") ? "Regenerate schedule" : "Generate schedule"}
+            <button type="button" className="btn btn-primary" onClick={onGenerateClick} disabled={pending || generating} aria-busy={generating}>
+              {generating ? <span className="spinner" aria-hidden="true" /> : null}
+              {generating
+                ? "Generating…"
+                : rows.some((r) => r.source === "AUTO")
+                  ? "Regenerate schedule"
+                  : "Generate schedule"}
             </button>
           ) : null}
           {canFinalize && weekStatus === "DRAFT" ? (
@@ -527,7 +540,23 @@ export function ScheduleActions({
         </div>
       </div>
 
-      {message ? <p className={message.kind === "success" ? "notice" : "error"}>{message.text}</p> : null}
+      {generating ? (
+        /* Reflects the real request in flight (scheduling engine call) — the
+           strip disappears the moment the operation settles. */
+        <div className="busy-strip" role="status" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
+          Running the scheduling engine for W{String(weekNumber).padStart(2, "0")} · {weekYear}…
+          <span className="busy-bar" aria-hidden="true" />
+        </div>
+      ) : null}
+      {message ? (
+        <p
+          className={message.kind === "success" ? "success-note" : "error-note"}
+          role={message.kind === "success" ? "status" : "alert"}
+        >
+          {message.text}
+        </p>
+      ) : null}
       {locked || correctionActive ? (
         <p className="info-note">
           {weekStatus === "PUBLISHED"

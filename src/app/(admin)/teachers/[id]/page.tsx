@@ -211,29 +211,55 @@ export default async function TeacherDetailsPage({
         </section>
 
         <section className="card">
-          <h2>Destination History</h2>
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Paper &amp; Archive</span>
+              <h2>Destination History</h2>
+            </div>
+            <span className="chip">{destinationHistory.length} recorded period(s)</span>
+          </div>
           {destinationHistory.length === 0 ? (
-            <p>
+            <p className="info-note">
               No recorded destination periods yet. The first period starts when a Current Destination is set —
               historical dates are never invented.
             </p>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr><th>Dako</th><th>Date Destined</th><th>Date Ended</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                  {destinationHistory.map((p) => (
-                    <tr key={p.id}>
-                      <td>{p.dakoName ? <Link href={`/dako/${p.dakoId}`}>{p.dakoName}</Link> : "—"}</td>
-                      <td>{p.startDate}</td>
-                      <td>{p.endDate ?? "—"}</td>
-                      <td>{p.endDate ? "Ended" : <strong>Active</strong>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="archive-list">
+              {destinationHistory.map((p, i) => (
+                <article
+                  className="archive-item"
+                  key={p.id}
+                  data-active={p.endDate ? "false" : "true"}
+                  style={{ "--i": i } as React.CSSProperties}
+                >
+                  <div className="archive-head">
+                    <span className="archive-title">
+                      {p.dakoName ? <Link href={`/dako/${p.dakoId}`}>{p.dakoName}</Link> : "—"}
+                    </span>
+                    <span className={p.endDate ? "badge badge-gray" : "badge badge-green"}>
+                      {p.endDate ? "Ended" : "Active"}
+                    </span>
+                  </div>
+                  <dl className="archive-meta">
+                    <div>
+                      <dt>Dako</dt>
+                      <dd>{p.dakoName ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Date Destined</dt>
+                      <dd>{p.startDate}</dd>
+                    </div>
+                    <div>
+                      <dt>Date Ended</dt>
+                      <dd>{p.endDate ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{p.endDate ? "Ended" : "Active (current destination)"}</dd>
+                    </div>
+                  </dl>
+                </article>
+              ))}
             </div>
           )}
           <p className="info-note">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 /**
@@ -13,12 +13,21 @@ import { useRouter } from "next/navigation";
 export function GenerateSuguanButton({ currentYear, currentWeek }: { currentYear: number; currentWeek: number }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // Real navigation state only — the button reflects the actual transition.
+  const [navigating, startNavigation] = useTransition();
   const weeklyHref = `/schedule?year=${currentYear}&week=${currentWeek}`;
 
   return (
     <div className="generate-suguan">
-      <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
-        Generate Suguan
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={() => setOpen(true)}
+        disabled={navigating}
+        aria-busy={navigating}
+      >
+        {navigating ? <span className="spinner" aria-hidden="true" /> : null}
+        {navigating ? "Opening schedule…" : "Generate Suguan"}
       </button>
       {open ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setOpen(false)}>
@@ -40,7 +49,7 @@ export function GenerateSuguanButton({ currentYear, currentWeek }: { currentYear
                 className="btn btn-primary"
                 onClick={() => {
                   setOpen(false);
-                  router.push(`${weeklyHref}&generate=auto`);
+                  startNavigation(() => router.push(`${weeklyHref}&generate=auto`));
                 }}
               >
                 Auto-generate
@@ -50,7 +59,7 @@ export function GenerateSuguanButton({ currentYear, currentWeek }: { currentYear
                 className="btn btn-secondary"
                 onClick={() => {
                   setOpen(false);
-                  router.push(weeklyHref);
+                  startNavigation(() => router.push(weeklyHref));
                 }}
               >
                 Manual

@@ -274,8 +274,58 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
 
   const weeks = Array.from({ length: schedule.weekCount }, (_, i) => i + 1);
 
+  /*
+   * Presentation-only week-column highlight: hovering any matrix cell marks
+   * the matching ISO-week column across all three tables. Applied directly to
+   * the DOM (no state) so a 53-week × N-dako matrix never re-renders on hover.
+   * No schedule data is read, written, or recalculated here.
+   */
+  const sectionRef = useRef<HTMLElement | null>(null);
+  function clearColumnHighlight() {
+    const root = sectionRef.current;
+    if (!root) return;
+    root.querySelectorAll(".col-hot").forEach((n) => n.classList.remove("col-hot"));
+    root.querySelectorAll<HTMLTableElement>(".annual-table").forEach((t) => {
+      delete t.dataset.hotCol;
+    });
+  }
+  function highlightColumn(week: number | null) {
+    const root = sectionRef.current;
+    if (!root) return;
+    const next = week === null ? "" : String(week);
+    const tables = Array.from(root.querySelectorAll<HTMLTableElement>(".annual-table"));
+    if (tables.length > 0 && tables.every((t) => (t.dataset.hotCol ?? "") === next)) return;
+    root.querySelectorAll(".col-hot").forEach((n) => n.classList.remove("col-hot"));
+    if (!next) {
+      tables.forEach((t) => delete t.dataset.hotCol);
+      return;
+    }
+    tables.forEach((t) => {
+      t.dataset.hotCol = next;
+      t.querySelectorAll<HTMLElement>(`td:nth-child(${Number(next) + 1}), th:nth-child(${Number(next) + 1})`).forEach(
+        (n) => n.classList.add("col-hot"),
+      );
+    });
+  }
+
   return (
-    <section className="annual-section">
+    <section
+      className="annual-section"
+      ref={sectionRef}
+      onMouseOver={(e) => {
+        const cell = (e.target as HTMLElement).closest("td") as HTMLTableCellElement | null;
+        if (!cell || cell.cellIndex < 1) return;
+        highlightColumn(cell.cellIndex);
+      }}
+      onMouseLeave={clearColumnHighlight}
+      onFocusCapture={(e) => {
+        /* keyboard parity: focusing a cell highlights its column too */
+        const cell = (e.target as HTMLElement).closest("td") as HTMLTableCellElement | null;
+        if (!cell || cell.cellIndex < 1) return;
+        highlightColumn(cell.cellIndex);
+      }}
+      onBlurCapture={clearColumnHighlight}
+    >
       <div className="annual-year-nav">
         <a className="btn btn-secondary" href={`/?year=${schedule.year - 1}`} aria-label={`Previous year ${schedule.year - 1}`}>
           ‹ {schedule.year - 1}

@@ -5,6 +5,7 @@ import { SESSION_COOKIE } from "@/server/auth/session";
 import { hasPermission } from "@/server/auth/permissions";
 import { cookies } from "next/headers";
 import { NotificationBell } from "./_components/notification-bell";
+import { AppShell, type ShellNavItem } from "./_components/app-shell";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   let user;
@@ -24,27 +25,31 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     redirect("/login");
   }
 
+  // Same items, same visibility rules as before (Audit stays ADMIN-only;
+  // the bell stays gated on notifications.read). Pages continue to enforce
+  // their own permissions server-side.
+  const navItems: ShellNavItem[] = [
+    { href: "/", label: "Dashboard", icon: "dashboard" },
+    { href: "/teachers", label: "Teachers", icon: "teachers" },
+    { href: "/dako", label: "Dako", icon: "dako" },
+    { href: "/availability", label: "Availability", icon: "availability" },
+    { href: "/schedule", label: "Schedule", icon: "schedule" },
+    { href: "/historical", label: "Historical", icon: "historical" },
+    { href: "/reports", label: "Reports", icon: "reports" },
+  ];
+  if (user.roleCodes.includes("ADMIN")) {
+    navItems.push({ href: "/audit-logs", label: "Audit", icon: "audit" });
+  }
+
   return (
-    <>
-      <nav>
-        <strong>PNK Admin</strong>
-        <a href="/">Dashboard</a>
-        <a href="/teachers">Teachers</a>
-        <a href="/dako">Dako</a>
-        <a href="/availability">Availability</a>
-        <a href="/schedule">Schedule</a>
-        <a href="/historical">Historical</a>
-        <a href="/reports">Reports</a>
-        {hasPermission(user.roleCodes, "notifications.read") ? <NotificationBell /> : null}
-        {user.roleCodes.includes("ADMIN") ? <a href="/audit-logs">Audit</a> : null}
-        <span style={{ marginLeft: "auto", color: "#555", fontSize: 13 }}>
-          {user.email} [{user.roleCodes.join(", ")}]
-        </span>
-        <form action={action}>
-          <button className="ghost" type="submit">Sign out</button>
-        </form>
-      </nav>
-      <main>{children}</main>
-    </>
+    <AppShell
+      navItems={navItems}
+      userEmail={user.email}
+      roleLabel={user.roleCodes.join(" · ")}
+      signOut={action}
+      bell={hasPermission(user.roleCodes, "notifications.read") ? <NotificationBell /> : null}
+    >
+      {children}
+    </AppShell>
   );
 }

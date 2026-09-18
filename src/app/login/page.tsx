@@ -36,15 +36,40 @@ export default async function LoginPage({
   }
 
   return (
-    <main style={{ maxWidth: 380, margin: "10vh auto" }}>
-      <h1>PNK Suguan System</h1>
-      <p style={{ color: "#555" }}>Teacher Assignment & Suguan Management</p>
-      {error ? <p className="error">{error}</p> : null}
-      <form action={action} className="inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
-        <label>Email<input name="email" type="email" required /></label>
-        <label>Password<input name="password" type="password" required /></label>
-        <button type="submit">Sign in</button>
-      </form>
+    <main className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <span className="brand-mark" aria-hidden="true">
+            PNK
+          </span>
+          <div>
+            <h1>PNK Suguan System</h1>
+            <p className="auth-sub">Teacher Assignment &amp; Suguan Management</p>
+          </div>
+        </div>
+        {error ? (
+          <p className="error-note" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <form action={action} className="form-col" style={{ marginTop: error ? 12 : 0 }}>
+          <label className="field">
+            <span>
+              Email <em>*</em>
+            </span>
+            <input name="email" type="email" required autoComplete="username" />
+          </label>
+          <label className="field">
+            <span>
+              Password <em>*</em>
+            </span>
+            <input name="password" type="password" required autoComplete="current-password" />
+          </label>
+          <button type="submit" className="btn btn-primary" style={{ justifyContent: "center" }}>
+            Sign in
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

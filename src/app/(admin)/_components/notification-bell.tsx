@@ -85,51 +85,68 @@ export function NotificationBell() {
   }
 
   return (
-    <div ref={rootRef} className="notif-bell" style={{ position: "relative" }}>
+    <div ref={rootRef} style={{ position: "relative" }}>
       <button
         type="button"
-        className="btn btn-secondary"
+        className="icon-btn"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={unreadCount ? `Notifications (${unreadCount} unread)` : "Notifications"}
+        title="Notifications"
         onClick={() => {
           setOpen((o) => !o);
           if (!open) load();
         }}
       >
-        🔔{unreadCount ? <span className="notif-count">{unreadCount}</span> : null}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
+          <path d="M13.7 20a2 2 0 0 1-3.4 0" />
+        </svg>
+        {unreadCount ? <span className="bell-count">{unreadCount}</span> : null}
       </button>
 
       {open ? (
-        <div className="notif-panel modal" role="dialog" aria-label="Notifications" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", width: 380, maxHeight: 480, overflowY: "auto", zIndex: 1000 }}>
-          <h3 style={{ marginTop: 0 }}>Notifications</h3>
-          {err ? <p className="error" role="alert">{err}</p> : null}
+        <div className="bell-panel" role="dialog" aria-label="Notifications">
+          <div className="bell-head">
+            <strong>Notifications</strong>
+            {unreadCount ? <span className="chip chip-accent">{unreadCount} unread</span> : null}
+          </div>
+          {err ? <p className="error" role="alert" style={{ padding: "0 14px" }}>{err}</p> : null}
           {items === null ? (
-            <p className="info-note">Loading…</p>
+            <div className="bell-list" aria-busy="true">
+              {[0, 1, 2].map((i) => (
+                <div className="bell-item" key={i}>
+                  <div className="skeleton skeleton-line" style={{ width: "58%" }} />
+                  <div className="skeleton skeleton-line" style={{ width: "82%" }} />
+                </div>
+              ))}
+            </div>
           ) : items.length === 0 ? (
-            <p className="info-note">No notifications.</p>
+            <p className="info-note" style={{ padding: "16px 14px" }}>
+              No notifications. Dako anniversary reminders appear here.
+            </p>
           ) : (
-            <ul className="notif-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            <ul className="bell-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {items.map((n) => {
                 const href = notificationHref(n.relatedEntityType, n.relatedEntityId);
                 return (
-                  <li key={n.id} className={n.readAt ? "notif-item notif-read" : "notif-item notif-unread"} style={{ borderTop: "1px solid #e5e7eb", padding: "8px 0" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <strong style={{ fontSize: 13 }}>{n.title}</strong>
+                  <li key={n.id} className="bell-item" data-unread={n.readAt ? "false" : "true"}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                      <span className="bell-item-title">{n.title}</span>
                       {!n.readAt ? (
-                        <button type="button" className="link-btn" disabled={busy} onClick={() => markRead(n.id)}>
+                        <button type="button" className="link-btn" style={{ fontSize: 12 }} disabled={busy} onClick={() => markRead(n.id)}>
                           mark read
                         </button>
                       ) : null}
                     </div>
-                    <div className="info-note" style={{ fontSize: 12 }}>
-                      <span className="badge badge-gray">{notificationTypeLabel(n.notificationType)}</span>{" "}
-                      {relativeTime(n.createdAt)}
-                      {n.readAt ? " · read" : " · unread"}
+                    <div className="bell-item-meta">
+                      <span className="badge badge-gray">{notificationTypeLabel(n.notificationType)}</span>
+                      <span>{relativeTime(n.createdAt)}</span>
+                      <span>{n.readAt ? "· read" : "· unread"}</span>
                     </div>
-                    {n.message ? <p style={{ margin: "4px 0 0", fontSize: 13 }}>{n.message}</p> : null}
+                    {n.message ? <p className="bell-item-body">{n.message}</p> : null}
                     {href ? (
-                      <a href={href} style={{ fontSize: 13 }} onClick={() => setOpen(false)}>
+                      <a href={href} style={{ fontSize: 12.5 }} onClick={() => setOpen(false)}>
                         View related page →
                       </a>
                     ) : null}

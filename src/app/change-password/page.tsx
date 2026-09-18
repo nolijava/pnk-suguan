@@ -42,17 +42,43 @@ export default async function ChangePasswordPage({
   }
 
   return (
-    <main style={{ maxWidth: 420, margin: "10vh auto" }}>
-      <h1>Change password</h1>
-      <p style={{ color: "#555" }}>
-        Signed in as {user?.email}. Minimum policy: {strength.checks.map((c) => c.rule).join(", ")}.
-      </p>
-      {error ? <p className="error">{error}</p> : null}
-      <form action={action} className="inline" style={{ flexDirection: "column", alignItems: "stretch" }}>
-        <label>Current password<input name="currentPassword" type="password" required /></label>
-        <label>New password<input name="newPassword" type="password" required /></label>
-        <button type="submit">Update password</button>
-      </form>
+    <main className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <span className="brand-mark" aria-hidden="true">
+            PNK
+          </span>
+          <div>
+            <h1>Change password</h1>
+            <p className="auth-sub">Signed in as {user?.email}</p>
+          </div>
+        </div>
+        <p className="info-note" style={{ marginTop: 0 }}>
+          Minimum policy: {strength.checks.map((c) => c.rule).join(", ")}.
+        </p>
+        {error ? (
+          <p className="error-note" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <form action={action} className="form-col">
+          <label className="field">
+            <span>
+              Current password <em>*</em>
+            </span>
+            <input name="currentPassword" type="password" required autoComplete="current-password" />
+          </label>
+          <label className="field">
+            <span>
+              New password <em>*</em>
+            </span>
+            <input name="newPassword" type="password" required autoComplete="new-password" />
+          </label>
+          <button type="submit" className="btn btn-primary" style={{ justifyContent: "center" }}>
+            Update password
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

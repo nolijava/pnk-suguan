@@ -93,16 +93,47 @@ export default async function DashboardPage({
     <>
       <div className="page-header">
         <div>
-          <h1>PNK Suguan Dashboard</h1>
-          <p>Annual Suguan schedule — SUGO, RESERBA, and RESERBA II for the selected year.</p>
+          <span className="eyebrow">Annual Suguan · {year}</span>
+          <h1>Suguan Dashboard</h1>
+          <p>SUGO, RESERBA, and RESERBA II assignment matrix for the selected ISO year.</p>
         </div>
-        {canGenerate ? (
-          <div>
-            {/* §16-§19 — new entry point into the EXISTING Phase 4 workflow. */}
+        <div className="page-header-actions">
+          <span className="chip chip-accent" title="Current ISO week">
+            ISO W{String(cur.week).padStart(2, "0")} · {cur.year}
+          </span>
+          {canGenerate ? (
+            /* §16-§19 — new entry point into the EXISTING Phase 4 workflow. */
             <GenerateSuguanButton currentYear={cur.year} currentWeek={cur.week} />
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
+
+      {summary ? (
+        <div className="stat-grid">
+          <div className="stat-card" data-tone="green">
+            <span className="stat-label">SUGO</span>
+            <div className="stat-value">{summary.sugo}</div>
+            <span className="stat-note">assigned this week</span>
+          </div>
+          <div className="stat-card" data-tone="gold">
+            <span className="stat-label">RESERBA</span>
+            <div className="stat-value">{summary.reserba}</div>
+            <span className="stat-note">assigned this week</span>
+          </div>
+          <div className="stat-card" data-tone="slate">
+            <span className="stat-label">RESERBA II</span>
+            <div className="stat-value">{summary.reserbaIi}</div>
+            <span className="stat-note">leftover pool</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-label">Unassigned</span>
+            <div className="stat-value">
+              {Math.max(summary.totalSlots - summary.sugo - summary.reserba - summary.reserbaIi, 0)}
+            </div>
+            <span className="stat-note">slots remaining</span>
+          </div>
+        </div>
+      ) : null}
 
       {rows.length === 0 ? (
         <div className="info-note" style={{ marginBottom: 12 }}>
@@ -111,17 +142,29 @@ export default async function DashboardPage({
         </div>
       ) : null}
 
-      <AnnualTables
-        schedule={schedule}
-        currentWeekKey={currentWeekKey}
-        currentIsoLabel={`W${cur.week} · ${cur.year}`}
-        cellInfo={cellInfo}
-        writable={writable}
-      />
+      <section className="section">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Annual Schedule</span>
+            <h2>Assignment Matrix</h2>
+          </div>
+          <span className="chip">Dako × ISO week × Suguan type</span>
+        </div>
+        <AnnualTables
+          schedule={schedule}
+          currentWeekKey={currentWeekKey}
+          currentIsoLabel={`W${cur.week} · ${cur.year}`}
+          cellInfo={cellInfo}
+          writable={writable}
+        />
+      </section>
 
       {summary ? (
-        <section className="dashboard-current-week">
-          <h2>Current Week</h2>
+        <section className="dashboard-current-week glass-card">
+          <div className="section-head">
+            <h2>Current Week</h2>
+            <span className="chip chip-gold">W{String(cur.week).padStart(2, "0")}</span>
+          </div>
           <p>
             <strong>
               ISO W{cur.week} · {wk!.startDate} – {wk!.endDate}
@@ -143,7 +186,7 @@ export default async function DashboardPage({
           </p>
         </section>
       ) : (
-        <section className="dashboard-current-week">
+        <section className="dashboard-current-week glass-card">
           <h2>Current Week</h2>
           <p className="info-note">
             Week {cur.week} of {cur.year} has not been started yet.
@@ -157,8 +200,10 @@ export default async function DashboardPage({
         </section>
       )}
 
-      <section className="dashboard-quick">
-        <h2>Quick links</h2>
+      <section className="dashboard-quick glass-card">
+        <div className="section-head">
+          <h2>Quick links</h2>
+        </div>
         <p>
           <Link className="btn btn-secondary" href="/teachers">Teachers</Link>{" "}
           <Link className="btn btn-secondary" href="/dako">Dako</Link>{" "}
