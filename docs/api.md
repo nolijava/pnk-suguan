@@ -255,3 +255,10 @@ category label, relative timestamp), mark-as-read **owned rows only** via the ex
 
 Tests: `tests/int/phase8.test.ts` — report fidelity/filters/source preservation, read-only proof, notifier
 stage windows, scan idempotence, ADMIN-only fan-out, mark-read ownership, navigation mapping.
+
+## Phase 9 — security hardening notes
+
+- **Error sanitization**: unexpected (non-`AppError`) exceptions now return a fixed generic body (`500 {"error":{"code":"INTERNAL","message":"internal error"}}`); full detail remains server-side only. Intentional validation/permission errors are unchanged.
+- **Login throttling**: failed logins apply a capped exponential backoff per account+IP (0.5s doubling to a 15s cap; resets on success). The response stays the uniform `Invalid credentials` — no account enumeration; correct credentials are rejected while a window is active.
+- **Security headers**: every response carries `Content-Security-Policy` (default-src 'self'; frame-ancestors 'none'; no unsafe-eval), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`.
+- **Dependency advisory (dev-only)**: `npm audit` reports 6 moderate advisories, all in dev tooling (`vitest` mocker path-traversal via `pnpm`-style flows, `drizzle-kit`'s esbuild dev-server exposure). No known vulnerabilities affect production dependencies (next, react, postgres, pdfkit, @node-rs/argon2, zod, drizzle-orm). Upgrades (vitest ≥3.2.5, drizzle-kit ≥0.31.x) are recommended separately and are not part of Phase 9.

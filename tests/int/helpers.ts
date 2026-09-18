@@ -6,6 +6,11 @@ import { hashPassword } from "@/server/auth/password";
 
 export const TEST_URL = process.env.PNK_TEST_DATABASE_URL ?? "postgresql://pnk:pnk@127.0.0.1:5434/pnk_test";
 
+// Service-layer code resolves its pool lazily via DATABASE_URL (client.ts
+// prefers DATABASE_URL, then PNK_TEST_DATABASE_URL). Default it in vitest
+// contexts so suites are deterministic regardless of the invoking shell.
+process.env.DATABASE_URL ??= process.env.PNK_TEST_DATABASE_URL ?? TEST_URL;
+
 export const sql = postgres(TEST_URL, { max: 1, prepare: false });
 export const db = drizzle(sql, { schema });
 

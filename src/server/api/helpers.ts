@@ -16,9 +16,14 @@ export function fail(error: unknown) {
   if (error instanceof AppError) {
     return NextResponse.json({ error: { code: error.code, message: error.message } }, { status: error.status });
   }
-  const message = error instanceof Error ? error.message : "internal error";
+  // Phase 9 — unexpected (non-AppError) failures must never leak internals
+  // (SQL text, driver errors, paths) to the client. Full detail stays in the
+  // SERVER-side log only; the response is a fixed generic message.
   console.error("[api] unhandled:", error);
-  return NextResponse.json({ error: { code: "INTERNAL", message } }, { status: 500 });
+  return NextResponse.json(
+    { error: { code: "INTERNAL", message: "internal error" } },
+    { status: 500 },
+  );
 }
 
 export async function parseBody<T>(req: Request): Promise<T> {

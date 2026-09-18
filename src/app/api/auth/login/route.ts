@@ -7,7 +7,12 @@ import { parseBody, fail } from "@/server/api/helpers";
 export async function POST(req: Request) {
   try {
     const body = loginSchema.parse(await parseBody(req));
-    const result = await login(body.email, body.password);
+    // Phase 9 — best-effort client IP for login throttling (proxy header
+    // first hop; absent locally → shared "unknown" bucket, which still
+    // throttles per-account). Never logged.
+    const fwd = req.headers.get("x-forwarded-for");
+    const clientIp = fwd ? fwd.split(",")[0]?.trim() : (req.headers.get("x-real-ip") ?? undefined);
+    const result = await login(body.email, body.password, { clientIp });
     const res = NextResponse.json({
       data: { userId: result.userId, mustChangePassword: result.mustChangePassword },
     });
