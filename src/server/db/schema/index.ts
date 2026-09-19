@@ -1,6 +1,7 @@
 export * from "./roles";
 export * from "./users";
 export * from "./sessions";
+export * from "./password-reset";
 export * from "./teachers";
 export * from "./dako";
 export * from "./weeks";

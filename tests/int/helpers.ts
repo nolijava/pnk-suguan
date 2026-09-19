@@ -19,7 +19,8 @@ let adminId: string | undefined;
 /** Per-test-file: truncate operational tables, create a fresh ADMIN user. */
 export async function resetTestDb(): Promise<void> {
   await sql`TRUNCATE TABLE assignment_history, assignments, teacher_availability, notifications,
-    dako_anniversary_notifications, audit_logs, sessions, user_roles, teachers, dako, weeks, users RESTART IDENTITY CASCADE`;
+    dako_anniversary_notifications, audit_logs, sessions, password_reset_challenges,
+    user_roles, teachers, dako, weeks, users RESTART IDENTITY CASCADE`;
   adminId = undefined;
 }
 

@@ -37,8 +37,9 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
-  // Keep native modules outside the bundler; they are loaded at runtime.
-  serverExternalPackages: ["@node-rs/argon2", "postgres"],
+  // Keep native/CJS-heavy modules outside the bundler; they are loaded at runtime.
+  // nodemailer is server-only (password-reset delivery) and uses dynamic requires.
+  serverExternalPackages: ["@node-rs/argon2", "postgres", "nodemailer"],
   typescript: {
     // Typechecking is run explicitly via `npm run typecheck`.
     ignoreBuildErrors: false,

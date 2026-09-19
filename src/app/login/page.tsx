@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentUserOrNull } from "@/server/auth/guard";
 import { login } from "@/server/auth/auth.service";
@@ -65,9 +66,14 @@ export default async function LoginPage({
             </span>
             <input name="password" type="password" required autoComplete="current-password" />
           </label>
-          <button type="submit" className="btn btn-primary" style={{ justifyContent: "center" }}>
+          <button type="submit" className="btn btn-primary auth-submit">
             Sign in
           </button>
+          <div className="auth-links">
+            <Link className="link-btn" href="/forgot-password">
+              Forgot password?
+            </Link>
+          </div>
         </form>
       </div>
     </main>

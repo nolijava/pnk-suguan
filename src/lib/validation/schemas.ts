@@ -142,6 +142,24 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(10).max(200),
 }).strict();
 
+// System update (Group 1) — self-service account recovery. The code is exactly
+// six digits; the ticket is an opaque 32-byte base64url value. Every value is
+// length-capped and strict, and no schema ever accepts an account id (a reset
+// can only ever act on the account resolved from the ticket/email itself).
+export const forgotPasswordSchema = z.object({
+  email: z.string().email().max(200),
+}).strict();
+
+export const verifyResetCodeSchema = z.object({
+  email: z.string().email().max(200),
+  code: z.string().trim().regex(/^\d{6}$/, "code must be 6 digits"),
+}).strict();
+
+export const resetPasswordSchema = z.object({
+  ticket: z.string().min(20).max(200),
+  newPassword: z.string().min(10).max(200),
+}).strict();
+
 export const userCreateSchema = z.object({
   email: z.string().email().max(200),
   fullName: z.string().min(1).max(200),

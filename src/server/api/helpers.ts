@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { AppError } from "@/lib/errors";
 
-export function ok<T>(data: T, status = 200) {
-  return NextResponse.json({ data }, { status });
+export function ok<T>(data: T, status = 200, headers?: Record<string, string>) {
+  return NextResponse.json({ data }, { status, ...(headers ? { headers } : {}) });
 }
 
 export function fail(error: unknown) {
