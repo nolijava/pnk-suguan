@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/server/auth/guard";
 import { DakoService } from "@/server/services";
 import { dakoQuerySchema } from "@/lib/validation/query-schemas";
-import { DataTable, StatusBadge, Toolbar, Pagination, ConfirmDialog } from "@/app/(admin)/_components";
+import { DataTable, StatusBadge, FilterForm, Pagination, ConfirmDialog } from "@/app/(admin)/_components";
 import type { Column } from "@/app/(admin)/_components";
 import type { DakoListRow } from "@/server/services/dako.service";
 
@@ -131,16 +131,22 @@ export default async function DakoPage({
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <Toolbar
+      {/* Filters apply as they change (no Apply button); sort/order/pageSize are
+          preserved so filtering never silently drops the active sort. */}
+      <FilterForm
         action="/dako"
-        searchPlaceholder="Search code, name, address, or purok/grupo…"
-        searchValue={query.q}
-        filters={[
+        fields={[
+          { kind: "search", name: "q", placeholder: "Search code, name, address, or purok/grupo…" },
           ...DAKO_FILTERS,
           { name: "purokGrupo", label: "Purok/Grupo", options: purokGroups.map((p) => ({ value: p, label: p })) },
           { name: "worshipDay", label: "Worship Day", options: DAY_OPTIONS },
         ]}
         values={baseSearch}
+        preserve={{
+          sort: query.sort,
+          order: query.order,
+          pageSize: query.pageSize ? String(query.pageSize) : undefined,
+        }}
       />
 
       <DataTable

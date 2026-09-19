@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { THEME_COOKIE, THEME_STORAGE_KEY, type Theme } from "@/lib/theme";
 
 /**
  * Application shell (visual layer only). Renders the sidebar navigation exactly
@@ -134,11 +135,15 @@ export function AppShell({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<Theme>("light");
+  const [scrolled, setScrolled] = useState(false);
+  const tipRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const stored = typeof window !== "undefined" ? window.localStorage.getItem("pnk-shell-collapsed") : null;
     if (stored === "true") setCollapsed(true);
+    // The DOM is the source of truth: the server rendered it from the cookie and
+    // the pre-paint bootstrap latched it, so the toggle never misreports.
     const current = document.documentElement.dataset.theme;
     setTheme(current === "dark" ? "dark" : "light");
   }, []);
@@ -147,6 +152,64 @@ export function AppShell({
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+
+  // Header readability: once content scrolls under the sticky bar it becomes
+  // ~95% opaque (see .topbar[data-scrolled="true"]).
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  /**
+   * Collapsed-rail tooltip. The old ::after tooltip was clipped by the rail's
+   * `overflow: hidden` and, because the rail also has `backdrop-filter`, any
+   * positioned descendant would be rooted at the rail itself. So the tooltip is
+   * a body-level layer: never clipped, above page content, hidden on scroll,
+   * resize, route change, and whenever the rail expands.
+   */
+  useEffect(() => {
+    const tip = document.createElement("div");
+    tip.className = "nav-tooltip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+    tipRef.current = tip;
+    const hide = () => tip.classList.remove("show");
+    window.addEventListener("resize", hide);
+    window.addEventListener("scroll", hide, true);
+    return () => {
+      window.removeEventListener("resize", hide);
+      window.removeEventListener("scroll", hide, true);
+      tip.remove();
+      tipRef.current = null;
+    };
+  }, []);
+
+  const hideRailTip = useCallback(() => {
+    tipRef.current?.classList.remove("show");
+  }, []);
+
+  const showRailTip = useCallback(
+    (target: EventTarget | null) => {
+      const tip = tipRef.current;
+      const item = (target as HTMLElement | null)?.closest(".nav-item") as HTMLElement | null;
+      if (!tip || !item || !collapsed || window.innerWidth <= 900) return;
+      const label = item.getAttribute("data-label");
+      if (!label) return;
+      tip.textContent = label;
+      const rect = item.getBoundingClientRect();
+      tip.style.left = `${Math.round(rect.right + 12)}px`;
+      tip.style.top = `${Math.round(rect.top + rect.height / 2)}px`;
+      tip.classList.add("show");
+    },
+    [collapsed],
+  );
+
+  // A collapsing rail (or a new route) never leaves a stale label floating.
+  useEffect(() => {
+    hideRailTip();
+  }, [collapsed, pathname, hideRailTip]);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -161,16 +224,23 @@ export function AppShell({
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === "dark" ? "light" : "dark";
-      document.documentElement.dataset.theme = next;
-      try {
-        window.localStorage.setItem("pnk-theme", next);
-      } catch {
-        /* storage unavailable — theme still applies for this session */
-      }
-      return next;
-    });
+    // Read the live DOM value (not component state) so the toggle can never
+    // drift out of sync, then persist to BOTH stores: the cookie is what the
+    // server renders next time, localStorage covers cookie-less contexts.
+    const current: Theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    const next: Theme = current === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    setTheme(next);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      /* storage unavailable — theme still applies for this session */
+    }
+    try {
+      document.cookie = `${THEME_COOKIE}=${next};path=/;max-age=31536000;samesite=lax`;
+    } catch {
+      /* cookies unavailable — localStorage still carries the choice */
+    }
   }, []);
 
   const page = PAGE_TITLES.find(([href]) => pathname === href || pathname.startsWith(`${href}/`));
@@ -190,7 +260,13 @@ export function AppShell({
         </div>
 
         <span className="nav-section-label">Workspace</span>
-        <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: 0, background: "none", border: "none" }}>
+        <nav
+          style={{ display: "flex", flexDirection: "column", gap: 2, padding: 0, background: "none", border: "none" }}
+          onMouseOver={(e) => showRailTip(e.target)}
+          onMouseLeave={hideRailTip}
+          onFocusCapture={(e) => showRailTip(e.target)}
+          onBlurCapture={hideRailTip}
+        >
           {navItems.map((item) => {
             const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(`${item.href}/`));
             return (
@@ -227,7 +303,7 @@ export function AppShell({
       ) : null}
 
       <div className="main-col">
-        <header className="topbar">
+        <header className="topbar" data-scrolled={scrolled ? "true" : undefined}>
           <button
             type="button"
             className="icon-btn mobile-only"

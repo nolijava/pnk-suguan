@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Modal } from "./modal";
 
 export interface ConfirmDialogProps {
   triggerLabel: string;
@@ -48,6 +49,7 @@ export function ConfirmDialog({
         {triggerLabel}
       </button>
       {open ? (
+        <Modal open onClose={() => setOpen(false)}>
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
           <div className="modal">
             <h2>{title}</h2>
@@ -74,6 +76,7 @@ export function ConfirmDialog({
             </form>
           </div>
         </div>
+        </Modal>
       ) : null}
     </>
   );

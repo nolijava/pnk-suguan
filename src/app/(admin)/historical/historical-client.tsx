@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Modal } from "../_components/modal";
 
 export interface HistoricalWeek {
   id: string;
@@ -273,6 +274,7 @@ export function HistoricalClient({
       </section>
 
       {correction ? (
+        <Modal open onClose={() => setCorrection(null)}>
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Correct historical record">
           <div className="modal">
             <h2>Correct Historical Record</h2>
@@ -327,6 +329,7 @@ export function HistoricalClient({
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
     </>
   );

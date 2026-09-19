@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { getDb, type Database } from "@/server/db/client";
 import { auditLogs, users } from "@/server/db/schema";
 import type { SessionUser } from "@/server/auth/session";
@@ -58,6 +58,8 @@ export async function listAuditLogs(opts: {
   entityType?: string;
   entityId?: string;
   action?: string;
+  /** Free-text filter on reason / action / entity type (Audit Log page filters). */
+  q?: string;
   page?: number;
   pageSize?: number;
 } = {}): Promise<{ rows: AuditListRow[]; total: number; page: number; pageCount: number }> {
@@ -65,6 +67,10 @@ export async function listAuditLogs(opts: {
   if (opts.entityType) conds.push(eq(auditLogs.entityType, opts.entityType));
   if (opts.entityId) conds.push(eq(auditLogs.entityId, opts.entityId));
   if (opts.action) conds.push(eq(auditLogs.action, opts.action));
+  if (opts.q && opts.q.trim()) {
+    const term = `%${opts.q.trim()}%`;
+    conds.push(or(ilike(auditLogs.reason, term), ilike(auditLogs.action, term), ilike(auditLogs.entityType, term)));
+  }
   const whereClause = conds.length > 0 ? and(...conds) : undefined;
 
   const page = Math.max(1, opts.page ?? 1);

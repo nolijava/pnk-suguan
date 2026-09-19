@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { StatusBadge } from "./status-badge";
+import { Modal } from "./modal";
 
 export interface EditorRow {
   teacherId: string;
@@ -287,6 +288,7 @@ export function AvailabilityEditor({
       ) : null}
 
       {showFillConfirm ? (
+        <Modal open onClose={() => setShowFillConfirm(false)}>
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Fill blanks confirmation">
           <div className="modal">
             <h2>Fill blanks as AVAILABLE</h2>
@@ -306,6 +308,7 @@ export function AvailabilityEditor({
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {showCorrection ? <CorrectionModal onCancel={() => setShowCorrection(false)} onSubmit={(r) => toggleCorrection(r, "begin")} pending={pending} /> : null}
@@ -325,6 +328,7 @@ function CorrectionModal({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   return (
+    <Modal open onClose={onCancel}>
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Unlock availability for correction">
       <div className="modal">
         <h2>Unlock availability for correction</h2>
@@ -360,5 +364,6 @@ function CorrectionModal({
         </div>
       </div>
     </div>
+    </Modal>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { StatusBadge } from "@/app/(admin)/_components";
+import { Modal } from "@/app/(admin)/_components/modal";
 
 /* Controlled field (label + input/select); matches the .field markup used by
    the other client editors (FormField is the uncontrolled server-form variant). */
@@ -58,11 +59,19 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
 
   /* form state */
   const [q, setQ] = useState(filters.q);
+  // What the CURRENT list was fetched with (the `filters` prop is the initial
+  // server state and never changes) — keeps the selects and Reset honest.
+  const [appliedFilters, setAppliedFilters] = useState(filters);
   const [create, setCreate] = useState({ email: "", fullName: "", password: "", roleCode: "VIEWER" });
   const [editName, setEditName] = useState("");
   const [roleChoice, setRoleChoice] = useState("VIEWER");
   const [reason, setReason] = useState("");
   const [confirmText, setConfirmText] = useState("");
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+  }, []);
 
   const isSuperAdmin = currentUserRoles.includes("SUPER_ADMIN");
 
@@ -96,7 +105,10 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
     if (next.role) params.set("role", next.role);
     if (next.status) params.set("status", next.status);
     const data = await call(() => fetch(`/api/users?${params.toString()}`));
-    if (data) setRows(data as UserListRow[]);
+    if (data) {
+      setRows(data as UserListRow[]);
+      setAppliedFilters({ q: next.q ?? "", role: next.role ?? "", status: next.status ?? "" });
+    }
   }
 
   /* ---------------- actions ---------------- */
@@ -187,7 +199,7 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
   }
 
   const filterDirty =
-    q !== filters.q || filters.role !== "" || filters.status !== "";
+    q !== "" || appliedFilters.role !== "" || appliedFilters.status !== "";
 
   return (
     <>
@@ -209,62 +221,69 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
         </div>
       ) : null}
 
-      <div className="toolbar">
-        <form
-          className="toolbar-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void refreshList({ q });
+      {/* ONE row: search + role + status + reset. No Search button — the search
+          field filters automatically on a short debounce (Enter applies now),
+          and every control keeps the shared input height/radius. */}
+      <form
+        className="toolbar"
+        role="search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (searchTimer.current) clearTimeout(searchTimer.current);
+          void refreshList({ q });
+        }}
+      >
+        <label className="toolbar-filter toolbar-grow">
+          <span>Search users</span>
+          <input
+            type="search"
+            value={q}
+            placeholder="Email or full name…"
+            onChange={(e) => {
+              const value = e.target.value;
+              setQ(value);
+              if (searchTimer.current) clearTimeout(searchTimer.current);
+              searchTimer.current = setTimeout(() => void refreshList({ q: value }), 350);
+            }}
+          />
+        </label>
+        <label className="toolbar-filter">
+          <span>Role</span>
+          <select
+            value={appliedFilters.role}
+            onChange={(e) => void refreshList({ q, role: e.target.value, status: appliedFilters.status })}
+          >
+            <option value="">All roles</option>
+            {ROLE_OPTIONS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="toolbar-filter">
+          <span>Status</span>
+          <select
+            value={appliedFilters.status}
+            onChange={(e) => void refreshList({ q, role: appliedFilters.role, status: e.target.value })}
+          >
+            <option value="">All statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={!filterDirty}
+          onClick={() => {
+            setQ("");
+            void refreshList({});
           }}
         >
-          <Field label="Search users">
-            <input
-              type="search"
-              value={q}
-              placeholder="Email or full name…"
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </Field>
-          <Field label="Role">
-            <select
-              value={filters.role}
-              onChange={(e) => void refreshList({ q, role: e.target.value, status: filters.status })}
-            >
-              <option value="">All roles</option>
-              {ROLE_OPTIONS.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Status">
-            <select
-              value={filters.status}
-              onChange={(e) => void refreshList({ q, role: filters.role, status: e.target.value })}
-            >
-              <option value="">All statuses</option>
-              <option value="ACTIVE">Active</option>
-              <option value="INACTIVE">Inactive</option>
-            </select>
-          </Field>
-          <button type="submit" className="btn btn-secondary" disabled={busy}>
-            Search
-          </button>
-          {filterDirty ? (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => {
-                setQ("");
-                void refreshList({});
-              }}
-            >
-              Reset
-            </button>
-          ) : null}
-        </form>
-      </div>
+          Reset
+        </button>
+      </form>
 
       <div className="table-wrap">
         <table className="data-table">
@@ -381,6 +400,7 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
       {/* ---------------- dialogs ---------------- */}
 
       {dialog?.kind === "create" ? (
+        <Modal open onClose={() => setDialog(null)}>
         <div className="modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="create-user-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="create-user-title">Create User</h3>
@@ -430,9 +450,11 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {dialog?.kind === "edit" ? (
+        <Modal open onClose={() => setDialog(null)}>
         <div className="modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="edit-user-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="edit-user-title">Edit User</h3>
@@ -454,9 +476,11 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {dialog?.kind === "role" ? (
+        <Modal open onClose={() => setDialog(null)}>
         <div className="modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="role-user-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="role-user-title">Change User Role?</h3>
@@ -493,9 +517,11 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {dialog?.kind === "status" && dialog.next === "INACTIVE" ? (
+        <Modal open onClose={() => setDialog(null)}>
         <div className="modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="status-user-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="status-user-title">Deactivate User?</h3>
@@ -526,9 +552,11 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {dialog?.kind === "temp" ? (
+        <Modal open onClose={() => setDialog(null)}>
         <div className="modal-backdrop" role="presentation" onClick={() => setDialog(null)}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="temp-user-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="temp-user-title">Temporary password</h3>
@@ -553,6 +581,7 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
     </>
   );

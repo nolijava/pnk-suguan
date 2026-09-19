@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requirePermission } from "@/server/auth/guard";
+import { FilterForm } from "@/app/(admin)/_components";
 import { weeklyReport } from "@/server/services/reports.service";
 import { isoWeek, isoWeeksInYear } from "@/lib/iso-week";
 import { StatusBadge, ReportSourceBadge } from "../_shared";
@@ -51,16 +52,17 @@ export default async function WeeklyReportPage({
         </div>
       </div>
 
-      <form method="get" action="/reports/weekly" className="week-jump">
-        <label>
-          Year <input type="number" name="year" defaultValue={year} min={1900} max={2999} style={{ width: 90 }} />
-        </label>
-        <label>
-          ISO Week <input type="number" name="week" defaultValue={week} min={1} max={53} style={{ width: 70 }} />
-        </label>
-        <button type="submit" className="btn btn-secondary">Go</button>
-        <Link className="btn btn-secondary" href={`/reports/weekly?year=${cur.year}&week=${cur.week}`}>Current week</Link>
-      </form>
+      {/* Year/week apply as they change; "Current week" restores the default. */}
+      <FilterForm
+        action="/reports/weekly"
+        values={{ year: String(year), week: String(week) }}
+        resetLabel="Current week"
+        resetHref={`/reports/weekly?year=${cur.year}&week=${cur.week}`}
+        fields={[
+          { kind: "number", name: "year", label: "Year", min: 1900, max: 2999, width: 90 },
+          { kind: "number", name: "week", label: "ISO Week", min: 1, max: 53, width: 70 },
+        ]}
+      />
 
       {report.sections.map((sec) => (
         <section key={sec.type} className="sched-section">

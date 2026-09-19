@@ -5,7 +5,7 @@ import { requirePermission } from "@/server/auth/guard";
 import { TeacherService, DakoService } from "@/server/services";
 import { calculateAge } from "@/lib/anniversary";
 import { teacherQuerySchema } from "@/lib/validation/query-schemas";
-import { DataTable, StatusBadge, Toolbar, Pagination, ConfirmDialog } from "@/app/(admin)/_components";
+import { DataTable, StatusBadge, FilterForm, Pagination, ConfirmDialog } from "@/app/(admin)/_components";
 import type { Column } from "@/app/(admin)/_components";
 import type { TeacherListRow } from "@/server/services/teacher.service";
 
@@ -154,12 +154,21 @@ export default async function TeachersPage({
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <Toolbar
+      {/* Filters apply as they change (no Apply button); sort/order/pageSize are
+          preserved so filtering never silently drops the active sort. */}
+      <FilterForm
         action="/teachers"
-        searchPlaceholder="Search code, first, middle, last, or full name…"
-        searchValue={query.q}
-        filters={[...TEACHER_FILTERS, destFilter]}
+        fields={[
+          { kind: "search", name: "q", placeholder: "Search code, first, middle, last, or full name…" },
+          ...TEACHER_FILTERS,
+          destFilter,
+        ]}
         values={baseSearch}
+        preserve={{
+          sort: query.sort,
+          order: query.order,
+          pageSize: query.pageSize ? String(query.pageSize) : undefined,
+        }}
       />
 
       <DataTable columns={columns} rows={rows} sort={query.sort} order={query.order} baseSearch={baseSearch}

@@ -4,6 +4,7 @@ import { AvailabilityService, WeekService, DakoService } from "@/server/services
 import { isoWeek, isoWeeksInYear } from "@/lib/iso-week";
 import { availabilityQuerySchema } from "@/lib/validation/query-schemas";
 import { StatusBadge } from "../_components/status-badge";
+import { FilterForm } from "../_components/filter-form";
 import { AvailabilityEditor, type EditorRow } from "../_components/availability-editor";
 import { hasPermission } from "@/server/auth/permissions";
 import { StateCard } from "../_components/state-card";
@@ -159,47 +160,42 @@ export default async function AvailabilityPage({
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
-      <form method="get" action="/availability" className="toolbar">
-        <input type="hidden" name="year" value={week.year} />
-        <input type="hidden" name="week" value={week.isoWeekNumber} />
-        <input type="search" name="q" placeholder="Search teacher code or name…" defaultValue={q.q ?? ""} />
-        <label className="toolbar-filter">
-          <span>Availability</span>
-          <select name="availability" defaultValue={q.availability ?? ""}>
-            <option value="">All</option>
-            {AVAILABILITY_FILTERS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="toolbar-filter">
-          <span>Master Status</span>
-          <select name="masterStatus" defaultValue={q.masterStatus ?? ""}>
-            <option value="">All</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INACTIVE">Inactive</option>
-          </select>
-        </label>
-        <label className="toolbar-filter">
-          <span>Language</span>
-          <select name="language" defaultValue={q.language ?? ""}>
-            <option value="">All</option>
-            <option value="FILIPINO">Filipino</option>
-            <option value="ENGLISH">English</option>
-          </select>
-        </label>
-        <label className="toolbar-filter">
-          <span>Current Destination</span>
-          <select name="currentDestinationId" defaultValue={q.currentDestinationId ?? ""}>
-            <option value="">All</option>
-            {dakoList.rows.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}{d.status === "DISABLED" ? " (disabled)" : ""}</option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" className="btn btn-primary">Apply</button>
-        <Link className="btn btn-secondary" href={`/availability?year=${week.year}&week=${week.isoWeekNumber}`}>Reset</Link>
-      </form>
+      {/* Filters apply as they change (no Apply button); the selected week is a
+          preserved parameter so filtering never jumps to another week. */}
+      <FilterForm
+        action="/availability"
+        values={q as Record<string, string | undefined>}
+        preserve={{ year: String(week.year), week: String(week.isoWeekNumber) }}
+        resetHref={`/availability?year=${week.year}&week=${week.isoWeekNumber}`}
+        fields={[
+          { kind: "search", name: "q", placeholder: "Search teacher code or name…" },
+          { name: "availability", label: "Availability", options: AVAILABILITY_FILTERS },
+          {
+            name: "masterStatus",
+            label: "Master Status",
+            options: [
+              { value: "ACTIVE", label: "Active" },
+              { value: "INACTIVE", label: "Inactive" },
+            ],
+          },
+          {
+            name: "language",
+            label: "Language",
+            options: [
+              { value: "FILIPINO", label: "Filipino" },
+              { value: "ENGLISH", label: "English" },
+            ],
+          },
+          {
+            name: "currentDestinationId",
+            label: "Current Destination",
+            options: dakoList.rows.map((d) => ({
+              value: d.id,
+              label: `${d.name}${d.status === "DISABLED" ? " (disabled)" : ""}`,
+            })),
+          },
+        ]}
+      />
 
       <p className="info-note">
         {list.total} teacher{list.total === 1 ? "" : "s"} shown · effective status counts master-inactive teachers as

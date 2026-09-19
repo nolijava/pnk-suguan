@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requirePermission } from "@/server/auth/guard";
+import { FilterForm } from "@/app/(admin)/_components";
 import { annualTypeReport, type ReportTypeCode } from "@/server/services/reports.service";
 import { isoWeek } from "@/lib/iso-week";
 import { StatusBadge, ReportSourceBadge, fmtUtc } from "../_shared";
@@ -49,21 +50,25 @@ export default async function AnnualReportPage({
         </div>
       </div>
 
-      <form method="get" action="/reports/annual" className="week-jump">
-        <label>
-          Year <input type="number" name="year" defaultValue={report.year} min={1900} max={2999} style={{ width: 90 }} />
-        </label>
-        <label>
-          Type{" "}
-          <select name="type" defaultValue={type}>
-            <option value="SUGO">SUGO</option>
-            <option value="RESERBA">RESERBA</option>
-            <option value="RESERBA_II">RESERBA II</option>
-          </select>
-        </label>
-        <button type="submit" className="btn btn-secondary">Go</button>
-        <Link className="btn btn-secondary" href={`/reports/annual?year=${cur.year}&type=${type}`}>Current year</Link>
-      </form>
+      {/* Auto-applying filters (no Apply/Go). Reset = the current year. */}
+      <FilterForm
+        action="/reports/annual"
+        values={{ year: String(report.year), type }}
+        resetLabel="Current year"
+        resetHref={`/reports/annual?year=${cur.year}&type=${type}`}
+        fields={[
+          { kind: "number", name: "year", label: "Year", min: 1900, max: 2999, width: 90 },
+          {
+            name: "type",
+            label: "Type",
+            options: [
+              { value: "SUGO", label: "SUGO" },
+              { value: "RESERBA", label: "RESERBA" },
+              { value: "RESERBA_II", label: "RESERBA II" },
+            ],
+          },
+        ]}
+      />
 
       <div className="table-wrap">
         <table>

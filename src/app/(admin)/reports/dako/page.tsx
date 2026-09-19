@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requirePermission } from "@/server/auth/guard";
+import { FilterForm } from "@/app/(admin)/_components";
 import { dakoAssignmentReport, REPORT_SOURCE_CODES, REPORT_TYPE_CODES } from "@/server/services/reports.service";
 import { DakoService } from "@/server/services";
 import { isoWeek } from "@/lib/iso-week";
@@ -44,48 +45,36 @@ export default async function DakoReportPage({
         </div>
       </div>
 
-      <form method="get" action="/reports/dako" className="week-jump">
-        <label>
-          Dako{" "}
-          <select name="dakoId" defaultValue={dakoId ?? ""}>
-            <option value="">— all dakos —</option>
-            {allDakos.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Year{" "}
-          <select name="year" defaultValue={year ?? ""}>
-            <option value="">— all —</option>
-            {[0, 1, 2].map((i) => (
-              <option key={cur.year - i} value={cur.year - i}>
-                {cur.year - i}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Source{" "}
-          <select name="source" defaultValue={source ?? ""}>
-            <option value="">— all —</option>
-            {REPORT_SOURCE_CODES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Type{" "}
-          <select name="type" defaultValue={type ?? ""}>
-            <option value="">— all —</option>
-            {REPORT_TYPE_CODES.map((t) => (
-              <option key={t} value={t}>{t === "RESERBA_II" ? "RESERBA II" : t}</option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" className="btn btn-secondary">Go</button>
-        <Link className="btn btn-secondary" href="/reports/dako">Reset</Link>
-      </form>
+      {/* Auto-applying filters (no Apply/Go). Reset clears every filter. */}
+      <FilterForm
+        action="/reports/dako"
+        values={{ dakoId, year: year === undefined ? undefined : String(year), source, type }}
+        fields={[
+          {
+            name: "dakoId",
+            label: "Dako",
+            options: allDakos.map((d) => ({ value: d.id, label: d.name })),
+          },
+          {
+            name: "year",
+            label: "Year",
+            options: [0, 1, 2].map((i) => ({ value: String(cur.year - i), label: String(cur.year - i) })),
+          },
+          {
+            name: "source",
+            label: "Source",
+            options: REPORT_SOURCE_CODES.map((s) => ({ value: s, label: s })),
+          },
+          {
+            name: "type",
+            label: "Type",
+            options: REPORT_TYPE_CODES.map((t) => ({
+              value: t,
+              label: t === "RESERBA_II" ? "RESERBA II" : t,
+            })),
+          },
+        ]}
+      />
 
       {invalidYear ? <p className="error">Invalid year — must be an integer between 1900 and 2999.</p> : null}
 

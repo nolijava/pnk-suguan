@@ -235,7 +235,12 @@ a:hover { text-decoration: underline; }
 @keyframes pnk-draw { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 @keyframes pnk-sweep { from { background-position: -160% 0, 0 0; } to { background-position: 160% 0, 0 0; } }
 
-.page-enter { animation: pnk-fade-up var(--dur-normal) var(--ease-out) both; }
+/* No fill-mode: an animation that FILLS forwards leaves an interpolated
+   identity matrix on the element, which silently makes it the containing block
+   for every `position: fixed` descendant (modals would then centre inside the
+   page instead of the viewport). Ending the animation returns the computed
+   transform to `none`, so page content can never trap a fixed overlay. */
+.page-enter { animation: pnk-fade-up var(--dur-normal) var(--ease-out); }
 .reveal { animation: pnk-fade-up var(--dur-smooth) var(--ease-out) both; animation-delay: calc(var(--i, 0) * 45ms); }
 .glass {
   background: var(--glass);
@@ -417,18 +422,34 @@ label { color: var(--text-muted); }
   border-radius: 0 3px 3px 0; background: linear-gradient(var(--accent), var(--gold));
   animation: pnk-fade-in var(--dur-normal) var(--ease-out) both;
 }
-/* Collapsed rail: icons only, tooltip on hover/focus */
-.shell[data-collapsed="true"] .nav-item { justify-content: center; padding: 10px 0; }
-.shell[data-collapsed="true"] .nav-item::after {
-  content: attr(data-label);
-  position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%) scale(0.96);
+/* Collapsed rail: icons only, horizontally centred in the full rail width.
+   Root cause of the old misalignment: the labels were hidden with
+   opacity/visibility only, so they kept their flex width and `justify-content:
+   center` centred icon + invisible text — pushing the icon left (and clipping
+   it against the rail). Taking them out of flow (gap 0, zero-width, clipped)
+   centres the ICON itself; the fade is preserved. */
+.shell[data-collapsed="true"] .nav-item { justify-content: center; gap: 0; padding: 10px 0; }
+.shell[data-collapsed="true"] .nav-label,
+.shell[data-collapsed="true"] .brand-text,
+.shell[data-collapsed="true"] .sidebar-foot-text { width: 0; min-width: 0; overflow: hidden; }
+.shell[data-collapsed="true"] .nav-section-label { max-height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; }
+/* The rail must not clip its tooltip. The tooltip itself is a body-level layer
+   (.nav-tooltip) because `backdrop-filter` here would otherwise become the
+   containing block for any positioned descendant. */
+.shell[data-collapsed="true"] .sidebar { overflow: visible; }
+
+/* Collapsed-rail tooltip — portaled to <body> (see AppShell), so it is never
+   clipped by the rail and always paints above page content and tables. */
+.nav-tooltip {
+  position: fixed; z-index: 70; pointer-events: none; white-space: nowrap;
   background: var(--surface); color: var(--text); border: 1px solid var(--border);
   padding: 5px 10px; border-radius: var(--radius-sm); font-size: 12.5px; font-weight: 550;
-  box-shadow: var(--shadow); opacity: 0; pointer-events: none; white-space: nowrap; z-index: 60;
-  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  box-shadow: var(--shadow); opacity: 0; visibility: hidden;
+  transform: translateY(-50%) scale(0.96);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
+    visibility var(--dur-fast) var(--ease-out);
 }
-.shell[data-collapsed="true"] .nav-item:hover::after,
-.shell[data-collapsed="true"] .nav-item:focus-visible::after { opacity: 1; transform: translateY(-50%) scale(1); }
+.nav-tooltip.show { opacity: 1; visibility: visible; transform: translateY(-50%) scale(1); }
 
 .sidebar-foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); }
 .collapse-btn {
@@ -451,6 +472,14 @@ label { color: var(--text-muted); }
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border-bottom: 1px solid var(--border);
+}
+/* Scrolled state: the glass treatment stays readable at the top of the page,
+   but once content passes underneath it the bar becomes ~95% opaque so table
+   rows and matrix cells can never bleed through the header text. */
+.topbar[data-scrolled="true"] {
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  border-bottom-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
 }
 .topbar-title { display: flex; flex-direction: column; min-width: 0; }
 .topbar-title strong { font-family: var(--font-display, system-ui); font-size: 15px; font-weight: 650; }
@@ -518,6 +547,20 @@ main { padding: 16px; max-width: 1200px; margin: 0 auto; }
   border-radius: var(--radius); margin-bottom: 12px; box-shadow: var(--shadow-sm);
 }
 .toolbar input[type="search"] { flex: 1 1 220px; }
+/* A .toolbar-filter is a COLUMN label (caption above the control), so its main
+   axis is vertical — a 220px flex-basis inherited from the row rule above would
+   become the control's HEIGHT (a tall, square-looking box). Reset it so a
+   wrapped search/select sizes to its content, while bare row toolbars keep the
+   220px growth. */
+.toolbar .toolbar-filter > input,
+.toolbar .toolbar-filter > select { flex: 0 0 auto; min-height: 34px; }
+/* Single-row filter surfaces (User Management): the search field grows, the
+   selects keep their natural width, and nothing wraps until smaller screens. */
+.toolbar-grow { flex: 1 1 240px; min-width: 200px; }
+.toolbar input[type="search"], .toolbar input[type="number"], .toolbar select { border-radius: var(--radius-sm); }
+@media (max-width: 640px) {
+  .toolbar-grow { min-width: 0; flex-basis: 100%; }
+}
 .toolbar-filter { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-muted); }
 .toolbar-form, .form-col { display: flex; flex-direction: column; gap: 10px; }
 
@@ -955,6 +998,13 @@ tbody tr:last-child td { border-bottom: none; }
 .auth-brand .brand-mark { width: 42px; height: 42px; flex-basis: 42px; border-radius: 12px; font-size: 14px; }
 .auth-card h1 { margin: 0; font-size: 19px; }
 .auth-card .auth-sub { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+/* Recovery flow (forgot password) — same design tokens as sign in. */
+.auth-submit { justify-content: center; width: 100%; }
+.auth-links { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; font-size: 13px; }
+.auth-links-foot { justify-content: center; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.otp-input { text-align: center; letter-spacing: 0.34em; font-size: 17px; font-variant-numeric: tabular-nums; }
+.rule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; color: var(--text-muted); }
+.rule-list li[data-ok="true"] { color: var(--success-text); }
 
 /* ============================================================ */
 /* 19. Reduced motion + responsive                              */
@@ -976,7 +1026,12 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 @media (max-width: 900px) {
-  .shell { grid-template-columns: minmax(0, 1fr); transition: none; }
+  /* The sidebar is out of flow here (a fixed drawer), so the collapsed grid
+     template must NOT survive: `76px 1fr` would push .content into the 76px
+     first column and squeeze the whole page. Force a single column in both
+     states. */
+  .shell,
+  .shell[data-collapsed="true"] { grid-template-columns: minmax(0, 1fr); transition: none; }
   .sidebar {
     position: fixed; inset: 0 auto 0 0; width: min(280px, 82vw);
     transform: translateX(-102%);

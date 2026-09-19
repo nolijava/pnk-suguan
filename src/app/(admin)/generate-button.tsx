@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Modal } from "./_components/modal";
 
 /**
  * Phase 6 §16-§19 — dashboard "Generate Suguan" entry point. Never generates
@@ -30,6 +31,7 @@ export function GenerateSuguanButton({ currentYear, currentWeek }: { currentYear
         {navigating ? "Opening schedule…" : "Generate Suguan"}
       </button>
       {open ? (
+        <Modal open onClose={() => setOpen(false)}>
         <div className="modal-backdrop" role="presentation" onClick={() => setOpen(false)}>
           <div
             className="modal"
@@ -70,6 +72,7 @@ export function GenerateSuguanButton({ currentYear, currentWeek }: { currentYear
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
     </div>
   );
