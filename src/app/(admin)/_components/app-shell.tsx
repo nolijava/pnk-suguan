@@ -138,6 +138,7 @@ export function AppShell({
   const [theme, setTheme] = useState<Theme>("light");
   const [scrolled, setScrolled] = useState(false);
   const tipRef = useRef<HTMLDivElement | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const stored = typeof window !== "undefined" ? window.localStorage.getItem("pnk-shell-collapsed") : null;
@@ -183,6 +184,68 @@ export function AppShell({
       window.removeEventListener("scroll", hide, true);
       tip.remove();
       tipRef.current = null;
+    };
+  }, []);
+
+  /**
+   * Revision #4 — the nav hover gradient's focal point follows the pointer.
+   *
+   * The position is written straight to the hovered item as CSS custom
+   * properties, deliberately NOT through React state: `pointermove` fires many
+   * times a second and re-rendering the shell (and every nav item) per move
+   * would be wasteful for a purely visual effect. One listener on the <nav>
+   * element, coalesced through a single requestAnimationFrame.
+   *
+   * Skipped entirely on touch/coarse-pointer devices and under
+   * `prefers-reduced-motion`, where the static blue/purple hover gradient from
+   * CSS applies unchanged — so nothing depends on hover for navigation.
+   */
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav || typeof window.matchMedia !== "function") return;
+    if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let frame = 0;
+    let pending: { el: HTMLElement; x: number; y: number } | null = null;
+
+    const flush = () => {
+      frame = 0;
+      if (!pending) return;
+      const { el, x, y } = pending;
+      el.style.setProperty("--nav-x", `${x.toFixed(2)}%`);
+      el.style.setProperty("--nav-y", `${y.toFixed(2)}%`);
+      pending = null;
+    };
+
+    const onMove = (event: PointerEvent) => {
+      const item = (event.target as HTMLElement | null)?.closest<HTMLElement>(".nav-item");
+      if (!item) return;
+      const rect = item.getBoundingClientRect();
+      pending = {
+        el: item,
+        x: rect.width > 0 ? ((event.clientX - rect.left) / rect.width) * 100 : 50,
+        y: rect.height > 0 ? ((event.clientY - rect.top) / rect.height) * 100 : 50,
+      };
+      if (frame === 0) frame = window.requestAnimationFrame(flush);
+    };
+
+    // Dropping the last position on exit means the next hover starts centred
+    // instead of jumping from wherever the pointer happened to leave.
+    const onLeave = () => {
+      pending = null;
+      nav.querySelectorAll<HTMLElement>(".nav-item").forEach((item) => {
+        item.style.removeProperty("--nav-x");
+        item.style.removeProperty("--nav-y");
+      });
+    };
+
+    nav.addEventListener("pointermove", onMove);
+    nav.addEventListener("pointerleave", onLeave);
+    return () => {
+      nav.removeEventListener("pointermove", onMove);
+      nav.removeEventListener("pointerleave", onLeave);
+      if (frame !== 0) window.cancelAnimationFrame(frame);
     };
   }, []);
 
@@ -261,6 +324,7 @@ export function AppShell({
 
         <span className="nav-section-label">Workspace</span>
         <nav
+          ref={navRef}
           style={{ display: "flex", flexDirection: "column", gap: 2, padding: 0, background: "none", border: "none" }}
           onMouseOver={(e) => showRailTip(e.target)}
           onMouseLeave={hideRailTip}

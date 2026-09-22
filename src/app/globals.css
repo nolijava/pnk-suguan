@@ -40,6 +40,12 @@
   --surface-3: #eae7df;
   --glass: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(255, 255, 255, 0.55);
+  /* Opaque-tier surface for raised OVERLAY panels (the notification dialog).
+     The glass tier above is right for large in-flow cards, but too see-through
+     for a panel floating over dense content: at 28% transparency the page
+     behind it competes with the panel's own text. 0.95 keeps the surface
+     faintly translucent while the CONTENTS stay fully opaque. */
+  --surface-raised: rgba(255, 255, 255, 0.95);
 
   /* Paper & Archive (destination history) */
   --paper: #fffdf7;
@@ -125,6 +131,9 @@
   --surface-3: #243047;
   --glass: rgba(30, 41, 59, 0.62);
   --glass-border: rgba(148, 163, 184, 0.16);
+  /* Midnight Command equivalent: solid dark slate at 5% transparency (matches
+     --surface-2 #1e293b). Text/icons stay fully opaque. */
+  --surface-raised: rgba(30, 41, 59, 0.95);
   --paper: #202a3d;
   --paper-border: #3a4354;
   --paper-bg: #18202f;
@@ -175,6 +184,14 @@
   syntax: "<angle>";
   initial-value: 0deg;
   inherits: false;
+}
+
+/* Revision #3 (corrected) hover-ring palette — VIVID YELLOW + VIVID PURPLE
+   only. Declared once here so every button shares one source; no existing
+   token is redefined and no other component reads these. */
+:root {
+  --ring-yellow: #ffe23d;
+  --ring-purple: #a855f7;
 }
 
 /* ============================================================ */
@@ -303,11 +320,18 @@ label { color: var(--text-muted); }
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
 }
+/* Revision #3 (corrected) — BLUE buttons only: on hover the blue fill gives way
+   to a bright, very light yellow → very light gray surface. The normal state is
+   untouched (still `--btn-bg` blue), and pointer-leave restores it for free
+   because this is a plain `:hover` rule. The label needs no change: the existing
+   `color: var(--btn-fg-hover)` is `--navy-950` in BOTH themes, so the dark text
+   the light surface requires was already there (AA: #0f172a on #fffcea ≈ 17:1).
+   The existing light-sweep layer is kept, so the sheen mechanism is unchanged. */
 .btn-primary:hover {
   color: var(--btn-fg-hover);
   border-color: transparent;
-  background-image: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.26) 50%, transparent 62%),
-    linear-gradient(135deg, var(--btn-bg-hover), color-mix(in srgb, var(--btn-bg-hover) 72%, var(--success)));
+  background-image: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.45) 50%, transparent 62%),
+    linear-gradient(135deg, #fffcea 0%, #fbfbf3 48%, #edeef2 100%);
   background-position: 160% 0, 0 0;
   box-shadow: 0 8px 22px var(--accent-soft);
   transform: translateY(-1px);
@@ -315,13 +339,43 @@ label { color: var(--text-muted); }
     box-shadow var(--dur-normal) var(--ease-out), transform var(--dur-normal) var(--ease-out);
 }
 .btn-primary:active { transform: scale(0.978); }
-/* Signature rotating conic border (hover/focus only, ring-only via mask) */
-.btn-primary::after {
+/* ------------------------------------------------------------------
+   Revision #3 (corrected) — the EXISTING gradient ring, standardized.
+
+   This is the one ring the app has: it lived on `.btn-primary::after`, it is
+   now declared once on the shared `.btn` family so every standard control
+   (primary / secondary / danger / ghost and their variants, including
+   `.auth-submit`) carries the same outline with no per-component duplication.
+   No second ring, no extra pseudo-element.
+
+   Thickness is exactly 2px — the ring band is the `inset`/`padding` pair.
+   Palette is strictly vivid yellow + vivid purple.
+
+   The normal state is untouched: the ring is fully transparent until hover
+   or keyboard focus, and the mask paints only the outer band, so each
+   button keeps its existing background, gradient, text colour, border,
+   shadow, normal-state effects, dimensions and existing hover transitions
+   in BOTH themes.
+
+   PERFORMANCE — the circulation runs ONLY while a button is hovered or
+   focus-visible: the base rule below declares no animation at all, and the
+   reveal rule is the sole place `pnk-rotate` is attached. An idle page
+   therefore has zero ring animation frames to composite.
+
+   Scoping: `.btn` is the app's shared button architecture. The bespoke
+   chrome/matrix controls (`.icon-btn`, `.collapse-btn`, `.cell-btn`) are
+   not part of it — `.cell-btn` already owns a strong hover glow + scale and
+   a rotating ring on a matrix cell would read as a layout glitch.
+
+   The Navigation Bar keeps its independent Revision #4 mouse-following
+   effect; it is not a `.btn` descendant and is not affected here.
+   ------------------------------------------------------------------ */
+.btn::after {
   content: ""; position: absolute; inset: -2px; z-index: -1; pointer-events: none;
   border-radius: calc(var(--radius-sm) + 2px);
   padding: 2px;
   background: conic-gradient(from var(--ring-angle),
-    var(--blue-500), var(--emerald-500), var(--gold-500), var(--blue-500));
+    var(--ring-yellow), var(--ring-purple), var(--ring-yellow));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -329,8 +383,8 @@ label { color: var(--text-muted); }
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
-.btn-primary:not([disabled]):hover::after,
-.btn-primary:not([disabled]):focus-visible::after { opacity: 0.85; animation: pnk-rotate 3s linear infinite; }
+.btn:not([disabled]):hover::after,
+.btn:not([disabled]):focus-visible::after { opacity: 0.9; animation: pnk-rotate 3.4s linear infinite; }
 
 .btn-secondary { background: var(--glass); border-color: var(--border); color: var(--text); }
 .btn-secondary:hover { background: var(--surface); border-color: var(--accent); color: var(--link); transform: translateY(-1px); }
@@ -395,6 +449,28 @@ label { color: var(--text-muted); }
   font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.09em;
   color: var(--text-faint); padding: 12px 10px 4px; white-space: nowrap;
 }
+/* The sidebar's own <nav> must NOT inherit the legacy `nav { align-items: center }`
+   element rule further down (that rule styles the old top navigation). Centring
+   the cross axis shrinks each item to its content and centres it in the rail, so
+   the EXPANDED sidebar showed short centred pills instead of full-width rows with
+   the icon hard left. `stretch` makes every item fill the rail — icon and label
+   stay left-aligned inside it — and the COLLAPSED rail still centres its icon,
+   because that state sets `justify-content: center` on the full-width item. */
+.sidebar nav { align-items: stretch; }
+
+/* Nav hover palette (Revision #4) — scoped to the sidebar so the global
+   accent/success tokens and every other component stay untouched. */
+.sidebar {
+  --nav-hover-from: rgba(59, 130, 246, 0.22); /* blue */
+  --nav-hover-to: rgba(147, 51, 234, 0.22); /* purple */
+  --nav-hover-text: #4c1d95;
+}
+[data-theme="dark"] .sidebar {
+  --nav-hover-from: rgba(96, 165, 250, 0.3);
+  --nav-hover-to: rgba(167, 139, 250, 0.34);
+  --nav-hover-text: #ede9fe;
+}
+
 .nav-item {
   position: relative; display: flex; align-items: center; gap: 11px;
   padding: 9px 11px; border-radius: var(--radius-sm);
@@ -405,8 +481,18 @@ label { color: var(--text-muted); }
 }
 .nav-item svg { flex: 0 0 18px; width: 18px; height: 18px; }
 .nav-item:hover {
-  color: var(--text); text-decoration: none;
-  background-image: linear-gradient(96deg, var(--accent-soft), var(--success-soft));
+  color: var(--nav-hover-text); text-decoration: none;
+  /* Revision #4 — blue + purple (was blue + green), with the focal point
+     following the pointer. `--nav-x` / `--nav-y` are written by the shell's
+     pointermove handler (one requestAnimationFrame, no React state); the
+     fallback keeps the highlight centred before the first move and on
+     touch/coarse-pointer devices, where the handler is never installed. */
+  background-image: radial-gradient(
+    140% 220% at var(--nav-x, 50%) var(--nav-y, 50%),
+    var(--nav-hover-to) 0%,
+    var(--nav-hover-from) 58%,
+    transparent 100%
+  );
   border-color: var(--glass-border);
   transform: translateX(1px);
 }
@@ -620,6 +706,12 @@ form.card, .card {
 .field span em { color: var(--danger-text); font-style: normal; }
 .field input, .field select, .field textarea { font-weight: 400; }
 .form-span { grid-column: 1 / -1; }
+/* Inline field validation (Revision #1/#2 — Create User form). Sits with the
+   control it belongs to so a rejected field is identified in place. */
+.field-error { color: var(--danger-text); font-weight: 550; font-size: 12px; }
+.password-rules { display: flex; flex-wrap: wrap; gap: 2px 12px; font-weight: 450; font-size: 11.5px; color: var(--text-faint); }
+.password-rules span[data-ok="true"] { color: var(--success-text); }
+.password-rules span[data-ok="false"] { color: var(--text-faint); }
 
 .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 26px; }
 .detail-grid dt { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 650; }
@@ -955,8 +1047,14 @@ tbody tr:last-child td { border-bottom: none; }
 /* ============================================================ */
 .bell-panel {
   position: absolute; right: 0; top: calc(100% + 8px); width: min(380px, 88vw);
-  background: var(--glass); backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  /* --surface-raised (≈95% opaque), NOT --glass: this panel floats over tables
+     and dense content, so its surface must separate from the page behind it.
+     Only the background is translucent — every child stays fully opaque — and
+     the backdrop blur is kept for the remaining 5%. Written in STANDARD syntax
+     only: declaring `-webkit-backdrop-filter` by hand as well made the build
+     collapse the pair and emit the prefixed form alone, which computed to
+     `backdrop-filter: none` (no blur at all). */
+  background: var(--surface-raised); backdrop-filter: blur(18px) saturate(150%);
   border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg); z-index: 60; overflow: hidden;
   animation: pnk-drop var(--dur-normal) var(--ease-out) both;
@@ -1016,8 +1114,10 @@ tbody tr:last-child td { border-bottom: none; }
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
-  .btn-primary:not([disabled]):hover::after,
-  .btn-primary:not([disabled]):focus-visible::after { animation: none; opacity: 0.85; }
+  /* Revision #3 ring: the vivid yellow/purple hover outline stays, but stops
+     circulating for reduced-motion users. */
+  .btn:not([disabled]):hover::after,
+  .btn:not([disabled]):focus-visible::after { animation: none; opacity: 0.9; }
   .cell-btn:hover, .cell-btn:focus-visible, .cell-static:hover { transform: none; }
   .annual-table .current-week { animation: none; }
   .archive-list::before { animation: none; }
@@ -1039,12 +1139,28 @@ tbody tr:last-child td { border-bottom: none; }
     box-shadow: var(--shadow-lg);
   }
   .sidebar[data-open="true"] { transform: none; }
+  /* The open drawer must sit ABOVE .drawer-backdrop (z-index 40). Sharing a
+     lower z-index let the scrim dim the menu and its 2px backdrop blur soften
+     it, so the navigation looked washed out on tablet/mobile. 45 lifts the
+     rail over the scrim while staying below .modal-backdrop (50), so a dialog
+     opened from the drawer still covers it. */
+  .sidebar[data-open="true"] { z-index: 45; }
   .shell[data-collapsed="true"] .sidebar .brand-text,
   .shell[data-collapsed="true"] .sidebar .nav-label,
   .shell[data-collapsed="true"] .sidebar .nav-section-label,
   .shell[data-collapsed="true"] .sidebar .sidebar-foot-text { opacity: 1; visibility: visible; }
   .shell[data-collapsed="true"] .sidebar .nav-item { justify-content: flex-start; padding: 9px 11px; }
   .shell[data-collapsed="true"] .sidebar .nav-item::after { display: none; }
+  /* The drawer is always the expanded presentation, but the collapsed state also
+     CLIPS these to zero width (width: 0; overflow: hidden). Restoring only
+     opacity/visibility left the labels present-but-invisible, so the drawer
+     rendered as bare icons floating mid-rail. Restore their boxes too. */
+  .shell[data-collapsed="true"] .sidebar .brand-text,
+  .shell[data-collapsed="true"] .sidebar .nav-label,
+  .shell[data-collapsed="true"] .sidebar .sidebar-foot-text { width: auto; overflow: visible; }
+  .shell[data-collapsed="true"] .sidebar .nav-section-label {
+    max-height: none; padding-top: 12px; padding-bottom: 4px; overflow: visible;
+  }
   .desktop-only { display: none !important; }
   .mobile-only { display: grid; }
   .content { padding: 14px; }
