@@ -1,6 +1,6 @@
 {
   "name": "pnk-suguan-system",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "PNK Teacher Assignment & Suguan Management System — Phase 1 foundation",
   "engines": {
@@ -22,6 +22,7 @@
     "db:down": "node scripts/portable-pg.mjs stop-dev",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:migrate-test": "tsx scripts/migrate.ts --database-url %TEST_DATABASE_URL%",
+    "package:win": "node scripts/package-windows.mjs",
     "setup:admin": "tsx scripts/setup-admin.ts",
     "setup:test-admin": "tsx scripts/setup-admin.ts --database-url %TEST_DATABASE_URL% --email admin@pnk.test --password testPass123!"
   },
