@@ -1,0 +1,73 @@
+# .packagingignore — paths that must NEVER be copied into a packaged build.
+#
+# Why this file exists: .gitignore protects COMMITS, not a packager that copies
+# the working tree. This is the authoritative exclusion list for L3 packaging and
+# later installer work, committed so the packager inherits it.
+#
+# Rules are repo-root-relative globs, one per line — plain exclusions only.
+# There are deliberately NO `!` re-include rules: negation semantics differ
+# between packing tools, so section 4 states what must be kept in prose instead.
+# A packager MUST apply these exclusions BEFORE copying anything.
+
+# ---------------------------------------------------------------------------
+# 1. SECRETS — never ship.
+#    These carry live credentials: the Postgres password, the SUPER_ADMIN
+#    unlock secret, the OTP pepper, and per-machine local config. The packaged
+#    application generates its own secrets at first run.
+# ---------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+.freebuff/super-admin-credentials.txt
+
+# ---------------------------------------------------------------------------
+# 2. LIVE DATA + UNSANITIZED BACKUPS — never ship.
+#    CRITICAL: .pg/backups holds pre-reset copies containing REAL Argon2id
+#    password hashes (users.json), session token hashes, and reset code/ticket
+#    hashes, plus a 66 MB physical cluster copy of the pre-reset dataset.
+#    pnk-dev / pnk-test are live development and test data directories.
+#    A fresh install must initdb an EMPTY cluster and apply migrations.
+# ---------------------------------------------------------------------------
+.pg/backups/**
+.pg/pnk-dev/**
+.pg/pnk-test/**
+.pg/*.log
+.pg/*.err
+
+# ---------------------------------------------------------------------------
+# 3. DEVELOPMENT / TOOLING ARTIFACTS — never ship.
+# ---------------------------------------------------------------------------
+.freebuff/**
+# a previously packaged build must never nest inside a new one
+dist/**
+.next/cache/**
+.next/dev/**
+.next/trace
+.next-dev.log
+.pg/l2-probe.mjs
+.pg/l2-probe-seed.mjs
+tsconfig.tsbuildinfo
+node_modules/.cache/**
+**/.DS_Store
+
+# ---------------------------------------------------------------------------
+# 4. DO NOT OVER-EXCLUDE — these ARE part of the package.
+#
+#    The exclusions in sections 1-3 are deliberately narrow. Do NOT widen them
+#    into blanket rules such as `.pg/**` or `.tools/**` (or `node_modules/**`,
+#    `.next/**` blanket-wide): the runtime needs parts of all of those trees.
+#
+#    REQUIRED — must be present in the packaged build:
+#      .tools/node/**        bundled portable Node 22 runtime
+#      .pg/pgsql/**          bundled portable PostgreSQL 16 binaries
+#                            (exclude only its data dirs and backups, above)
+#      package.json, package-lock.json, next.config.ts, tsconfig.json
+#      public/**             static assets
+#      src/app/fonts/**      vendored fonts (no network fetch at runtime)
+#      drizzle/**            migrations + drizzle.config.ts, applied at first run
+#      the Next.js production build output
+#
+#    node_modules: install/refresh it with the lockfile at package time rather
+#    than copying it blindly — only the traced production dependency set belongs
+#    in the package (e.g. an `output: "standalone"` build).
+# ---------------------------------------------------------------------------

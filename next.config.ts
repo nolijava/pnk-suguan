@@ -34,12 +34,20 @@ export function securityHeadersFor(dev: boolean): Array<{ key: string; value: st
 const SECURITY_HEADERS = securityHeadersFor(isDev);
 
 const nextConfig: NextConfig = {
+  // L3 — local Windows packaging. `standalone` emits a self-contained server
+  // tree (.next/standalone) with only the traced runtime dependencies, so the
+  // package can ship its own Node runtime instead of requiring one on PATH.
+  output: "standalone",
+  outputFileTracingRoot: __dirname,
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
   // Keep native/CJS-heavy modules outside the bundler; they are loaded at runtime.
   // nodemailer is server-only (password-reset delivery) and uses dynamic requires.
-  serverExternalPackages: ["@node-rs/argon2", "postgres", "nodemailer"],
+  // pdfkit is listed because it reads its Helvetica metrics from its own
+  // `js/data/*.afm` files at runtime via fs — bundling it would drop those data
+  // files and break PDF generation in the packaged build.
+  serverExternalPackages: ["@node-rs/argon2", "postgres", "nodemailer", "pdfkit"],
   typescript: {
     // Typechecking is run explicitly via `npm run typecheck`.
     ignoreBuildErrors: false,

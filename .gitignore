@@ -6,6 +6,9 @@ node_modules/
 out/
 next-env.d.ts
 
+# L3 packaged Windows build (build artifact, rebuilt via `npm run package:win`)
+dist/
+
 # portable toolchain (Node.js) — machine-local, not part of the repo
 .tools/
 
