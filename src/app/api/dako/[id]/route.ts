@@ -1,6 +1,7 @@
-import { ok, fail, parseBody } from "@/server/api/helpers";
+import { ok, fail, parseBody, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { DakoService } from "@/server/services";
+import { reasonQuerySchema } from "@/lib/validation/query-schemas";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -30,9 +31,9 @@ export async function DELETE(req: Request, { params }: Params) {
   try {
     const user = await requirePermission("dako.write");
     const { id } = await params;
-    const url = new URL(req.url);
-    const reason = url.searchParams.get("reason");
-    if (!reason) return fail(new Error("reason query param is required for disabling"));
+    // A missing or blank `reason` is the caller's error (400), not the
+    // sanitized 500 this used to return.
+    const { reason } = parseQuery(req, reasonQuerySchema);
     return ok(await DakoService.disableDako(id, reason, user));
   } catch (err) {
     return fail(err);

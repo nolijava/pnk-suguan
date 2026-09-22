@@ -167,3 +167,76 @@ export const destinationAssignSchema = z.object({
 });
 
 export type DestinationAssign = z.infer<typeof destinationAssignSchema>;
+
+// ---------------------------------------------------------------------------
+// L6 — query-parameter schemas
+//
+// Every URL parameter must be validated before it reaches a query, so a
+// malformed value is a structured 400 (see `parseQuery`) rather than a driver
+// error sanitized into a 500 — or a filter silently dropped. Values that are
+// legitimately optional stay optional; a value that IS present must still be
+// well-formed.
+// ---------------------------------------------------------------------------
+
+/** `weekId` as a REQUIRED parameter: /api/assignments, prev-week absences. */
+export const weekIdQuerySchema = z.object({ weekId: z.string().uuid() }).strict();
+
+/** /api/assignment-counts — all filters optional, but each must be well-formed. */
+export const assignmentCountsQuerySchema = z
+  .object({
+    teacherId: z.string().uuid().optional(),
+    dakoId: z.string().uuid().optional(),
+    assignmentType: assignmentTypeSchema.optional(),
+  })
+  .strict();
+
+/**
+ * /api/audit-logs — `entityId` is a uuid column (a malformed one used to reach
+ * the planner) and `pageSize` is bounded exactly as the service clamps it.
+ */
+export const auditLogsQuerySchema = z
+  .object({
+    entityType: z.string().min(1).max(100).optional(),
+    entityId: z.string().uuid().optional(),
+    action: z.string().min(1).max(100).optional(),
+    page: z.coerce.number().int().min(1).optional(),
+    pageSize: z.coerce.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+
+/** /api/weeks — `year` is optional; a malformed one is rejected, never ignored. */
+export const weeksQuerySchema = z
+  .object({ year: z.coerce.number().int().min(1900).max(2999).optional() })
+  .strict();
+
+/** /api/schedule/annual — the ISO year whose schedule is requested. */
+export const annualScheduleQuerySchema = z
+  .object({ year: z.coerce.number().int().min(1900).max(2999) })
+  .strict();
+
+/**
+ * /api/schedule/weekly-suguan-pdf — `year` + `week`. `week` is bounded to 53
+ * here and checked against the ISO week count of `year` by the route, since
+ * only that pairing can decide it.
+ */
+export const weeklySuguanPdfQuerySchema = z
+  .object({
+    year: z.coerce.number().int().min(1900).max(2999),
+    week: z.coerce.number().int().min(1).max(53),
+  })
+  .strict();
+
+/**
+ * Mandated `reason` on the soft-disable/deactivate DELETE routes. Trimmed and
+ * non-empty: a blank reason is the same caller error as a missing one, and the
+ * service would otherwise reject it one layer later as a 422.
+ */
+export const reasonQuerySchema = z.object({ reason: z.string().trim().min(1).max(500) }).strict();
+
+export type WeekIdQuery = z.infer<typeof weekIdQuerySchema>;
+export type AssignmentCountsQuery = z.infer<typeof assignmentCountsQuerySchema>;
+export type AuditLogsQuery = z.infer<typeof auditLogsQuerySchema>;
+export type WeeksQuery = z.infer<typeof weeksQuerySchema>;
+export type AnnualScheduleQuery = z.infer<typeof annualScheduleQuerySchema>;
+export type WeeklySuguanPdfQuery = z.infer<typeof weeklySuguanPdfQuerySchema>;
+export type ReasonQuery = z.infer<typeof reasonQuerySchema>;

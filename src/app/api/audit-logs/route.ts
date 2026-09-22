@@ -1,19 +1,23 @@
-import { ok, fail } from "@/server/api/helpers";
+import { ok, fail, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { AuditService } from "@/server/services";
 import { auditLogs } from "@/server/db/schema";
 import { getDb } from "@/server/db/client";
+import { auditLogsQuerySchema } from "@/lib/validation/query-schemas";
 
 export async function GET(req: Request) {
   try {
     await requirePermission("audit.read");
-    const url = new URL(req.url);
+    // `entityId` is a uuid column and page numbers feed LIMIT/OFFSET, so a
+    // malformed filter used to become a driver error (or a NaN limit) behind
+    // the sanitized 500.
+    const query = parseQuery(req, auditLogsQuerySchema);
     const result = await AuditService.listAuditLogs({
-      entityType: url.searchParams.get("entityType") ?? undefined,
-      entityId: url.searchParams.get("entityId") ?? undefined,
-      action: url.searchParams.get("action") ?? undefined,
-      page: Number(url.searchParams.get("page") ?? 1),
-      pageSize: Number(url.searchParams.get("pageSize") ?? 100),
+      entityType: query.entityType,
+      entityId: query.entityId,
+      action: query.action,
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? 100,
     });
     return ok(result);
   } catch (err) {

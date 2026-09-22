@@ -61,6 +61,19 @@ const routeModules = (): Array<{ path: string; mod: Record<string, unknown> }> =
     import.meta.glob("../../src/app/api/**/route.ts", { eager: true }) as Record<string, Record<string, unknown>>,
   ).map(([path, mod]) => ({ path, mod }));
 
+/**
+ * The ONE route that is deliberately reachable without a session.
+ *
+ * `/api/health` is the local launcher's readiness probe: the launcher has no
+ * session, so it cannot authenticate. It is safe to exempt because (a) the
+ * packaged server binds to 127.0.0.1, so it is unreachable off the machine, and
+ * (b) the payload is limited to liveness booleans — see the dedicated assertion
+ * below, which fails if a sensitive field is ever added. Every other exported
+ * handler must still reject anonymous requests.
+ */
+const ANONYMOUS_ALLOWED = ["/api/health/route.ts"];
+const isAnonymousAllowed = (path: string) => ANONYMOUS_ALLOWED.some((p) => path.endsWith(p));
+
 /** Insert a week row directly (avoids the validated service path in fixtures). */
 async function mkWeek(year: number, week: number, status = "DRAFT") {
   const { startDate, endDate } = isoWeekDates(year, week);
@@ -104,7 +117,12 @@ describe("Phase 9 — anonymous request sweep (every guarded route export)", () 
     expect(modules.length).toBeGreaterThanOrEqual(20);
 
     let handlersTested = 0;
+    let exempted = 0;
     for (const { path, mod } of modules) {
+      if (isAnonymousAllowed(path)) {
+        exempted++;
+        continue;
+      }
       for (const method of HTTP_METHODS) {
         const handler = mod[method];
         if (typeof handler !== "function") continue;
@@ -124,8 +142,31 @@ describe("Phase 9 — anonymous request sweep (every guarded route export)", () 
         expect(text).not.toContain('"data"'); // never a success payload
       }
     }
-    // Guard against the table silently rotting.
+    // Guard against the table silently rotting, and against the exemption list
+    // growing unnoticed: exactly one route may be anonymously reachable.
     expect(handlersTested).toBeGreaterThan(25);
+    expect(exempted).toBe(1);
+  });
+
+  it("the exempted readiness route exposes liveness booleans and nothing sensitive", async () => {
+    const mod = (await import("../../src/app/api/health/route")) as {
+      GET: (r: Request) => Promise<Response>;
+    };
+    const res = await mod.GET(new Request("http://localhost:3000/api/health"));
+    // 200 when the database answers, 503 when it does not — never a 5xx crash.
+    expect([200, 503]).toContain(res.status);
+
+    const body = (await res.json()) as Record<string, unknown>;
+    // The exact key set is pinned: adding a leaky field breaks this test.
+    expect(Object.keys(body).sort()).toEqual(["db", "ready", "status", "uptimeSeconds"]);
+    expect(typeof body.ready).toBe("boolean");
+    expect(typeof body.db).toBe("boolean");
+
+    // No credential, connection string, version or user data may appear.
+    const text = JSON.stringify(body).toLowerCase();
+    for (const needle of ["postgres", "password", "secret", "token", "user", "@", "http"]) {
+      expect(text, `health payload must not contain "${needle}"`).not.toContain(needle);
+    }
   });
 });
 
@@ -234,6 +275,7 @@ describe("Phase 9 — RBAC permission matrix", () => {
       "teachers.write",
       "dako.write",
       "weeks.write",
+      "weeks.unlock", // L2: VIEWER must never enable FINALIZED revision
       "availability.write",
       "assignments.write",
       "scheduling.generate",
@@ -246,13 +288,15 @@ describe("Phase 9 — RBAC permission matrix", () => {
     expect(hasPermission(["VIEWER"], "reports.read")).toBe(true);
   });
 
-  it("SCHEDULER has operational writes but no ADMIN-only grants", () => {
+  it("SCHEDULER has operational writes + FINALIZED revision, but no ADMIN-only grants", () => {
     expect(hasPermission(["SCHEDULER"], "assignments.write")).toBe(true);
     expect(hasPermission(["SCHEDULER"], "scheduling.generate")).toBe(true);
+    // L2: `weeks.unlock` authorizes the FINALIZED revision window ONLY. It never
+    // grants finalize, publish, or the PUBLISHED (SUPER_ADMIN-only) correction.
+    expect(hasPermission(["SCHEDULER"], "weeks.unlock")).toBe(true);
     for (const p of [
       "weeks.finalize",
       "weeks.publish",
-      "weeks.unlock",
       "assignments.override",
       "users.manage",
       "audit.read",

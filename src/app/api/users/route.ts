@@ -1,4 +1,4 @@
-import { ok, fail, parseBody } from "@/server/api/helpers";
+import { ok, fail, parseBody, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { UserManagementService } from "@/server/services";
 import { userListQuerySchema, userCreateSchema } from "@/lib/validation/schemas";
@@ -10,11 +10,11 @@ import { userListQuerySchema, userCreateSchema } from "@/lib/validation/schemas"
  */
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url);
-    const flat = Object.fromEntries(url.searchParams.entries());
-    const parsed = userListQuerySchema.safeParse(flat);
-    const filters = parsed.success ? parsed.data : {};
+    // Authorization first, then the filters. This used to `safeParse` and fall
+    // back to `{}`, so a malformed filter was silently DROPPED — the list came
+    // back unfiltered with no indication why.
     const actor = await requirePermission("users.manage");
+    const filters = parseQuery(req, userListQuerySchema);
     return ok(await UserManagementService.listUsers(filters, actor));
   } catch (err) {
     return fail(err);

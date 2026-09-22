@@ -1,13 +1,16 @@
-import { ok, fail, parseBody } from "@/server/api/helpers";
+import { ok, fail, parseBody, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { WeekService } from "@/server/services";
+import { weeksQuerySchema } from "@/lib/validation/query-schemas";
 
 export async function GET(req: Request) {
   try {
     await requirePermission("weeks.read");
-    const url = new URL(req.url);
-    const year = url.searchParams.get("year");
-    return ok(await WeekService.listWeeks(year ? Number(year) : undefined));
+    // `year` stays optional; when supplied it must be a real year. A malformed
+    // value used to become NaN, which is falsy — so the UNFILTERED list came
+    // back as though no filter had been requested at all.
+    const { year } = parseQuery(req, weeksQuerySchema);
+    return ok(await WeekService.listWeeks(year));
   } catch (err) {
     return fail(err);
   }

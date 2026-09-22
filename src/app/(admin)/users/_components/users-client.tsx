@@ -1,13 +1,30 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { StatusBadge } from "@/app/(admin)/_components";
 import { Modal } from "@/app/(admin)/_components/modal";
+import { checkPasswordStrength } from "@/lib/password-strength";
+import { userCreateSchema } from "@/lib/validation/schemas";
 
 /* Controlled field (label + input/select); matches the .field markup used by
    the other client editors (FormField is the uncontrolled server-form variant). */
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  error,
+  errorId,
+  hint,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  /** shown under the control; the control must also set aria-describedby */
+  error?: string;
+  errorId?: string;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <label className="field">
       <span>
@@ -15,9 +32,20 @@ function Field({ label, required, children }: { label: string; required?: boolea
         {required ? <em aria-hidden="true"> *</em> : null}
       </span>
       {children}
+      {error ? (
+        <span className="field-error" id={errorId}>
+          {error}
+        </span>
+      ) : null}
+      {hint}
     </label>
   );
 }
+
+/* The Create dialog's own field names — kept in one place so the schema issues
+   (whose `path` is `email` / `fullName` / `password` / `roleCode`) map straight
+   onto a control. */
+type CreateFieldName = "email" | "fullName" | "password" | "roleCode";
 import type { UserListRow } from "@/server/services/user-management.service";
 
 const ROLE_OPTIONS = [
@@ -63,6 +91,12 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
   // server state and never changes) — keeps the selects and Reset honest.
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const [create, setCreate] = useState({ email: "", fullName: "", password: "", roleCode: "VIEWER" });
+  /* Fields the user has left at least once — errors appear then, not while the
+     caret is still in an empty box. */
+  const [createTouched, setCreateTouched] = useState<Partial<Record<CreateFieldName, boolean>>>({});
+  /* Field-level issues the SERVER reported (mapped from `error.issues`), so a
+     rejection points at the offending control instead of only a banner. */
+  const [serverIssues, setServerIssues] = useState<Partial<Record<CreateFieldName, string>>>({});
   const [editName, setEditName] = useState("");
   const [roleChoice, setRoleChoice] = useState("VIEWER");
   const [reason, setReason] = useState("");
@@ -75,6 +109,47 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
 
   const isSuperAdmin = currentUserRoles.includes("SUPER_ADMIN");
 
+  /* ---------------- Create dialog validation -------------
+     The dialog validates with the SAME modules the server enforces:
+     `userCreateSchema` (@/lib/validation/schemas) and `checkPasswordStrength`
+     (@/lib/password-strength). Both are pure, client-safe modules, so the
+     form's rules cannot drift from the API's, and a form this dialog accepts
+     cannot be rejected by the server. The server still validates
+     independently — this is a second line, not a replacement. */
+  const createCheck = useMemo(() => userCreateSchema.safeParse(create), [create]);
+  const passwordChecks = useMemo(
+    () => checkPasswordStrength(create.password).checks,
+    [create.password],
+  );
+  const passwordOk = passwordChecks.every((c) => c.ok);
+
+  const createIssueFor = (field: CreateFieldName) => {
+    if (createCheck.success) return undefined;
+    return createCheck.error.issues.find((issue) => issue.path[0] === field);
+  };
+  /** Plain-language wording for the same rules Zod states technically. */
+  const createFieldError: Partial<Record<CreateFieldName, string>> = {
+    email: createIssueFor("email") ? "Enter a valid email address." : undefined,
+    fullName: createIssueFor("fullName") ? "Enter the user's full name." : undefined,
+    password: passwordOk ? undefined : "Password does not meet the requirements below.",
+  };
+  const canCreate = createCheck.success && passwordOk;
+
+  function openCreateDialog() {
+    setCreateTouched({});
+    setServerIssues({});
+    setError(null);
+    setDialog({ kind: "create" });
+  }
+
+  /** Server issue first (authoritative), then the local rule, once touched. */
+  const errorFor = (field: CreateFieldName): string | undefined => {
+    if (field === "password" && create.password === "") return undefined;
+    if (serverIssues[field]) return serverIssues[field];
+    if (!createTouched[field]) return undefined;
+    return createFieldError[field];
+  };
+
   function applyRow(updated: UserListRow) {
     setRows((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
     startTransition(() => router.refresh());
@@ -85,11 +160,22 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
     setError(null);
     try {
       const res = await fn();
-      const body = (await res.json()) as { data?: unknown; error?: { message?: string } };
+      const body = (await res.json()) as {
+        data?: unknown;
+        error?: { message?: string; issues?: { path?: string; message?: string }[] };
+      };
       if (!res.ok) {
         setError(body.error?.message ?? "Request failed.");
+        // A 422 reports one entry per rejected field; surface them per control.
+        const issues: Partial<Record<CreateFieldName, string>> = {};
+        for (const issue of body.error?.issues ?? []) {
+          const field = issue.path as CreateFieldName | undefined;
+          if (field && issue.message && issues[field] === undefined) issues[field] = issue.message;
+        }
+        setServerIssues(issues);
         return null;
       }
+      setServerIssues({});
       return body.data;
     } catch {
       setError("Network error — please retry.");
@@ -114,6 +200,10 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
   /* ---------------- actions ---------------- */
 
   async function submitCreate() {
+    // The button is already disabled while invalid; this keeps the contract true
+    // even if the dialog is submitted another way (Enter, automation).
+    setCreateTouched({ email: true, fullName: true, password: true, roleCode: true });
+    if (!canCreate) return;
     const data = (await call(() =>
       fetch("/api/users", {
         method: "POST",
@@ -124,6 +214,7 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
     if (data?.id) {
       setDialog({ kind: "temp", email: create.email, temp: create.password });
       setCreate({ email: "", fullName: "", password: "", roleCode: "VIEWER" });
+      setCreateTouched({});
       await refreshList({});
       startTransition(() => router.refresh());
     }
@@ -209,7 +300,7 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
           <p>Accounts, roles, and access for the PNK Suguan System.</p>
         </div>
         <div className="page-header-actions">
-          <button type="button" className="btn btn-primary" onClick={() => setDialog({ kind: "create" })}>
+          <button type="button" className="btn btn-primary" onClick={openCreateDialog}>
             + Create User
           </button>
         </div>
@@ -408,25 +499,60 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
               The account starts with a temporary password; the user must change it at first login.
             </p>
             <div className="form-col">
-              <Field label="Email" required>
+              <Field
+                label="Email"
+                required
+                error={errorFor("email")}
+                errorId="create-user-email-error"
+              >
                 <input
                   type="email"
                   value={create.email}
                   autoComplete="off"
+                  aria-invalid={errorFor("email") ? true : undefined}
+                  aria-describedby={errorFor("email") ? "create-user-email-error" : undefined}
+                  onBlur={() => setCreateTouched((t) => ({ ...t, email: true }))}
                   onChange={(e) => setCreate({ ...create, email: e.target.value })}
                 />
               </Field>
-              <Field label="Full name" required>
+              <Field
+                label="Full name"
+                required
+                error={errorFor("fullName")}
+                errorId="create-user-name-error"
+              >
                 <input
                   value={create.fullName}
+                  aria-invalid={errorFor("fullName") ? true : undefined}
+                  aria-describedby={errorFor("fullName") ? "create-user-name-error" : undefined}
+                  onBlur={() => setCreateTouched((t) => ({ ...t, fullName: true }))}
                   onChange={(e) => setCreate({ ...create, fullName: e.target.value })}
                 />
               </Field>
-              <Field label="Temporary password" required>
+              <Field
+                label="Temporary password"
+                required
+                error={serverIssues.password}
+                errorId="create-user-password-error"
+                hint={
+                  <span
+                    className="password-rules"
+                    id="create-user-password-rules"
+                    aria-label="Password requirements"
+                  >
+                    {passwordChecks.map((check) => (
+                      <span key={check.rule} data-ok={check.ok ? "true" : "false"}>
+                        {check.ok ? "✓" : "•"} {check.rule}
+                      </span>
+                    ))}
+                  </span>
+                }
+              >
                 <input
                   type="text"
                   value={create.password}
                   autoComplete="off"
+                  aria-describedby="create-user-password-rules"
                   onChange={(e) => setCreate({ ...create, password: e.target.value })}
                 />
               </Field>
@@ -444,7 +570,12 @@ export function UsersClient({ initialRows, filters, currentUserId, currentUserRo
               <button type="button" className="btn btn-secondary" onClick={() => setDialog(null)} disabled={busy}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-primary" onClick={() => void submitCreate()} disabled={busy || !create.email || !create.fullName || !create.password}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void submitCreate()}
+                disabled={busy || !canCreate}
+              >
                 Create User
               </button>
             </div>

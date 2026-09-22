@@ -1,4 +1,4 @@
-import { ok, fail } from "@/server/api/helpers";
+import { ok, fail, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { AvailabilityService } from "@/server/services";
 import { availabilityFillBlanksSchema } from "@/lib/validation/schemas";
@@ -11,8 +11,8 @@ import { availabilityFillBlanksSchema } from "@/lib/validation/schemas";
 export async function GET(req: Request) {
   try {
     await requirePermission("availability.read");
-    const url = new URL(req.url);
-    const parsed = availabilityFillBlanksSchema.parse(Object.fromEntries(url.searchParams.entries()));
+    // GET takes the same shape as the POST body, but as a query parameter.
+    const parsed = parseQuery(req, availabilityFillBlanksSchema);
     return ok({ weekId: parsed.weekId, count: await AvailabilityService.countFillBlankTargets(parsed.weekId) });
   } catch (err) {
     return fail(err);

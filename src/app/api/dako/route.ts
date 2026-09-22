@@ -1,4 +1,4 @@
-import { ok, fail, parseBody } from "@/server/api/helpers";
+import { ok, fail, parseBody, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { DakoService } from "@/server/services";
 import type { DakoCreateInput } from "@/lib/validation/schemas";
@@ -7,9 +7,7 @@ import { dakoQuerySchema } from "@/lib/validation/query-schemas";
 export async function GET(req: Request) {
   try {
     await requirePermission("dako.read");
-    const url = new URL(req.url);
-    const raw = Object.fromEntries(url.searchParams.entries());
-    const query = dakoQuerySchema.parse(raw);
+    const query = parseQuery(req, dakoQuerySchema);
     return ok(
       await DakoService.listDako({
         search: query.q,

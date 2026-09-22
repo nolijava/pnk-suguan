@@ -1,14 +1,15 @@
-import { ok, fail, parseBody } from "@/server/api/helpers";
+import { ok, fail, parseBody, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { AssignmentService } from "@/server/services";
 import type { AssignmentCreateInput } from "@/lib/validation/schemas";
+import { weekIdQuerySchema } from "@/lib/validation/query-schemas";
 
 export async function GET(req: Request) {
   try {
     await requirePermission("assignments.read");
-    const url = new URL(req.url);
-    const weekId = url.searchParams.get("weekId");
-    if (!weekId) return fail(new Error("weekId query param is required"));
+    // Authorization ran first (above), so a missing or malformed `weekId` is
+    // the caller's error (400) — never the sanitized 500 it used to produce.
+    const { weekId } = parseQuery(req, weekIdQuerySchema);
     return ok(await AssignmentService.listAssignmentsForWeek(weekId));
   } catch (err) {
     return fail(err);

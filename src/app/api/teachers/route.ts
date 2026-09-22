@@ -1,4 +1,4 @@
-import { ok, fail, parseBody } from "@/server/api/helpers";
+import { ok, fail, parseBody, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { TeacherService } from "@/server/services";
 import type { TeacherCreateInput } from "@/lib/validation/schemas";
@@ -7,9 +7,7 @@ import { teacherQuerySchema } from "@/lib/validation/query-schemas";
 export async function GET(req: Request) {
   try {
     await requirePermission("teachers.read");
-    const url = new URL(req.url);
-    const raw = Object.fromEntries(url.searchParams.entries());
-    const query = teacherQuerySchema.parse(raw);
+    const query = parseQuery(req, teacherQuerySchema);
     return ok(
       await TeacherService.listTeachers({
         search: query.q,

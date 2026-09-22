@@ -1,4 +1,4 @@
-import { ok, fail } from "@/server/api/helpers";
+import { ok, fail, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { AssignmentService } from "@/server/services";
 import { slotCandidatesQuerySchema } from "@/lib/validation/query-schemas";
@@ -12,17 +12,9 @@ import { slotCandidatesQuerySchema } from "@/lib/validation/query-schemas";
 export async function GET(req: Request) {
   try {
     await requirePermission("assignments.read");
-    const url = new URL(req.url);
-    const parsed = slotCandidatesQuerySchema.safeParse({
-      weekId: url.searchParams.get("weekId") ?? undefined,
-      dakoId: url.searchParams.get("dakoId") ?? undefined,
-      assignmentType: url.searchParams.get("assignmentType") ?? undefined,
-      assignmentId: url.searchParams.get("assignmentId") ?? undefined,
-    });
-    if (!parsed.success) {
-      return fail(new Error("invalid query"));
-    }
-    const { weekId, dakoId, assignmentType, assignmentId } = parsed.data;
+    // A malformed slot selection is the caller's error (400). This used to
+    // `fail(new Error("invalid query"))`, i.e. the sanitized 500.
+    const { weekId, dakoId, assignmentType, assignmentId } = parseQuery(req, slotCandidatesQuerySchema);
     return ok(
       await AssignmentService.listSlotCandidates(weekId, dakoId, assignmentType, assignmentId),
     );

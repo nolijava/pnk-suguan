@@ -1,4 +1,4 @@
-import { ok, fail, parseBody } from "@/server/api/helpers";
+import { ok, fail, parseBody, parseQuery } from "@/server/api/helpers";
 import { requirePermission } from "@/server/auth/guard";
 import { AvailabilityService } from "@/server/services";
 import { availabilityQuerySchema } from "@/lib/validation/query-schemas";
@@ -11,9 +11,7 @@ import type { AvailabilityUpsertInput } from "@/lib/validation/schemas";
 export async function GET(req: Request) {
   try {
     await requirePermission("availability.read");
-    const url = new URL(req.url);
-    const qp = Object.fromEntries(url.searchParams.entries());
-    const q = availabilityQuerySchema.parse(qp);
+    const q = parseQuery(req, availabilityQuerySchema);
     const result = await AvailabilityService.listWeeklyAvailability(q.weekId, {
       search: q.q,
       availability: q.availability,
