@@ -9,6 +9,13 @@ next-env.d.ts
 # L3 packaged Windows build (build artifact, rebuilt via `npm run package:win`)
 dist/
 
+# Release binaries are published as GitHub Release assets, not git objects —
+# GitHub hard-blocks files over 100 MB on push and the EXE/ZIP payloads are
+# 85-250 MB. Checksums/manifests stay tracked so every asset is verifiable.
+release/*.zip
+release/**/*.zip
+release/**/*.exe
+
 # portable toolchain (Node.js) — machine-local, not part of the repo
 .tools/
 
