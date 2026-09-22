@@ -73,6 +73,7 @@ Integration tests need the test cluster: `PNK_TEST_DATABASE_URL` (see `.env.loca
 - **Logs**: `.pg/dev.log`, `.pg/test.log`.
 - **Backup**: standard `pg_dump` on the `pnk` database; both clusters are disposable dev/test stores — production should use Docker/managed Postgres with the same migrations.
 - **Unlocking a schedule** (FINALIZED → DRAFT) is ADMIN-only and requires a reason; it is audited as `UNLOCKED_SCHEDULE`.
+- **Revising a FINALIZED schedule** (the "Enable Revision…" action) does **not** revert to DRAFT. It is authorized by the `weeks.unlock` permission — SUPER_ADMIN, ADMIN and SCHEDULER/ENCODER (VIEWER denied) — opens a temporary holder-scoped, reason-required, audited window, and leaves the week FINALIZED. PUBLISHED is a separate, SUPER_ADMIN-only path via the emergency unlock secret.
 
 ## SUPER_ADMIN: provisioning, unlock secret, and password recovery
 
@@ -95,6 +96,26 @@ hashing pattern — insert the `user_roles` row for the SUPER_ADMIN role, and wr
 
 Safeguards that remain in force: SUPER_ADMIN is never a selectable role in the UI; no code path
 grants it; the account is audited like any other; deactivation revokes its sessions.
+
+`scripts/provision-super-admin.ts` implements exactly that procedure so the operation is repeatable
+and audited rather than hand-rolled:
+
+```bash
+node node_modules/tsx/dist/cli.mjs scripts/provision-super-admin.ts \
+  --email super.admin@pnk.local [--database-url <url>]
+```
+
+- **New email** → creates the account with a one-time CSPRNG password (`must_change_password = true`),
+  inserts the `user_roles` row for SUPER_ADMIN, and audits `GRANTED_SUPER_ADMIN`.
+- **Existing email** → rotates the one-time password, re-forces rotation, ensures the grant, revokes
+  the account's sessions, and audits `RESET_USER_PASSWORD` (plus `GRANTED_SUPER_ADMIN` if the grant
+  was missing). Safe to re-run at any time.
+- **INACTIVE account** → refused; reactivate through the `/users` UI first.
+- The one-time password satisfies the app policy (≥10 chars, upper, lower, digit, symbol) and is printed
+  exactly once. It is never stored in the database, never written to an audit row, and never returned
+  by an API — so capture it at the terminal.
+- `--database-url` overrides `DATABASE_URL`; without it the script uses `DATABASE_URL` from the
+  environment (note `dotenv/config` reads `.env`, **not** `.env.local`).
 
 ### The unlock secret
 
