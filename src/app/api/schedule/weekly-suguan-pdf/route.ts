@@ -3,9 +3,10 @@ import { generateWeeklySuguanPdf } from "@/server/services/weekly-suguan-pdf.ser
 import { getDb } from "@/server/db/client";
 import { weeks } from "@/server/db/schema";
 import { and, eq } from "drizzle-orm";
-import { fail } from "@/server/api/helpers";
-import { NotFoundError, ValidationError } from "@/lib/errors";
+import { fail, parseQuery } from "@/server/api/helpers";
+import { BadRequestError, NotFoundError } from "@/lib/errors";
 import { isoWeeksInYear } from "@/lib/iso-week";
+import { weeklySuguanPdfQuerySchema } from "@/lib/validation/query-schemas";
 
 /**
  * Phase 7 — print-ready Weekly Suguan physical form (READ-ONLY).
@@ -17,11 +18,13 @@ import { isoWeeksInYear } from "@/lib/iso-week";
 export async function GET(req: Request) {
   try {
     await requirePermission("assignments.write");
-    const url = new URL(req.url);
-    const year = Number(url.searchParams.get("year"));
-    const week = Number(url.searchParams.get("week"));
-    if (!Number.isInteger(year) || year < 1900 || year > 2999) throw new ValidationError("invalid year");
-    if (!Number.isInteger(week) || week < 1 || week > isoWeeksInYear(year)) throw new ValidationError("invalid week");
+    // A missing or malformed selection is the CALLER's error (400), not a
+    // sanitized 500. `week` is additionally bounded by the ISO week count of
+    // `year`, which only the pair can decide.
+    const { year, week } = parseQuery(req, weeklySuguanPdfQuerySchema);
+    if (week > isoWeeksInYear(year)) {
+      throw new BadRequestError(`week must be between 1 and ${isoWeeksInYear(year)} for ISO year ${year}`);
+    }
 
     // Read-only resolution: look up the existing weeks row; never create one
     // (ensureWeek would INSERT — the PDF layer must not write).

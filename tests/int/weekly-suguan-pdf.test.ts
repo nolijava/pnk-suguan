@@ -285,31 +285,41 @@ describe("phase 7 — weekly suguan PDF (read-only output layer)", () => {
   });
 
   // ------------------------------------------------- single-page guarantee
-  it("layout: §48 column widths exact-span 540pt and match approved proportions", async () => {
-    const { sectionColumnWidths } = await import("@/server/services/weekly-suguan-pdf.service");
-    const W = 8.5 * 72 - 2 * 0.5 * 72; // 540pt printable width
+  it("layout: column widths exact-span the form table and match the reference proportions", async () => {
+    const { sectionColumnWidths, PDF_LAYOUT } = await import(
+      "@/server/services/weekly-suguan-pdf.service"
+    );
+    // The columns span the printed table's measured width exactly (the reference
+    // form's table is 561.6pt wide, not a 540pt margin-derived box).
     for (const section of ["A", "B", "C"] as const) {
       const widths = sectionColumnWidths(section);
-      expect(widths.reduce((a, b) => a + b, 0)).toBe(W);
+      expect(widths.reduce((a, b) => a + b, 0)).toBeCloseTo(PDF_LAYOUT.tableWidth, 6);
     }
-    // §48 proportions (A/B): DAKO ≈14.6%, ORAS ≈9.1%, PANGALAN ≈29.8%,
-    // PAGTANGGAP ≈22.2%, PAGBABAGO remainder — never equal-width.
-    const [dako = 0, oras = 0, pangalan = 0, pagtanggap = 0, pagbabago = 0] = sectionColumnWidths("A");
-    expect(dako / 540).toBeGreaterThan(0.14);
-    expect(dako / 540).toBeLessThan(0.155);
-    expect(oras / 540).toBeGreaterThan(0.08);
-    expect(oras / 540).toBeLessThan(0.10);
-    expect(pangalan / 540).toBeGreaterThan(0.29);
-    expect(pangalan / 540).toBeLessThan(0.305);
-    expect(pagtanggap / 540).toBeGreaterThan(0.21);
-    expect(pagtanggap / 540).toBeLessThan(0.225);
-    expect(pagbabago / 540).toBeGreaterThan(0.21);
-    expect(pagbabago / 540).toBeLessThan(0.25);
-    // §42 — Section C carries SIX columns including PAGTUPAD.
-    expect(sectionColumnWidths("C").length).toBe(6);
+    // Proportions: DAKO ≈14.5%, ORAS ≈8.9%, PANGALAN ≈28.9% are the reference
+    // form's MEASURED shares. The reference's sixth PAGTUPAD column is
+    // deliberately not printed (user revision); its width is split evenly
+    // between the two annotation columns, so PAGTANGGAP and PAGBABAGO each
+    // print at ≈23.8% — balanced, and still never equal to every other column.
+    const [dako = 0, oras = 0, pangalan = 0, pagtanggap = 0, pagbabago = 0] =
+      sectionColumnWidths("A");
+    const share = (w: number) => w / PDF_LAYOUT.tableWidth;
+    expect(share(dako)).toBeGreaterThan(0.14);
+    expect(share(dako)).toBeLessThan(0.15);
+    expect(share(oras)).toBeGreaterThan(0.085);
+    expect(share(oras)).toBeLessThan(0.095);
+    expect(share(pangalan)).toBeGreaterThan(0.28);
+    expect(share(pangalan)).toBeLessThan(0.30);
+    expect(share(pagtanggap)).toBeGreaterThan(0.23);
+    expect(share(pagtanggap)).toBeLessThan(0.245);
+    expect(share(pagbabago)).toBeGreaterThan(0.23);
+    expect(share(pagbabago)).toBeLessThan(0.245);
+    expect(pagtanggap).toBe(pagbabago); // balanced annotation columns
+    // A/B/C share ONE five-column grid (PAGTUPAD is no longer printed).
+    expect(sectionColumnWidths("C")).toEqual(sectionColumnWidths("A"));
+    expect(sectionColumnWidths("C").length).toBe(5);
   });
 
-  it("layout: the physical form is ALWAYS exactly ONE page — dense 22-dako case included", async () => {
+  it("layout: page 1 is ALWAYS exactly ONE 612×936 page — dense 22-dako case included", async () => {
     // Worst realistic case: 22 active dakos, A+B fully assigned, 5 RESERBA_II.
     const w = await mkWeek(2093, 10);
     const dakoIds: string[] = [];
@@ -329,13 +339,20 @@ describe("phase 7 — weekly suguan PDF (read-only output layer)", () => {
       await assign(w.id, dakoIds[i]!, t.id, "RESERBA_II");
     }
 
-    const { generateWeeklySuguanPdf, countPdfPages } = await import("@/server/services/weekly-suguan-pdf.service");
-    const { buffer } = await generateWeeklySuguanPdf(w.id);
-    expect(countPdfPages(buffer)).toBe(1); // THE physical-form guarantee
+    const { generateWeeklySuguanPdf, renderWeeklySuguanPdf, countPdfPages } = await import(
+      "@/server/services/weekly-suguan-pdf.service"
+    );
+    const { buffer, vm, slips } = await generateWeeklySuguanPdf(w.id);
+    // THE physical-form guarantee, unchanged: page 1 is one page, however dense
+    // the week (it shrinks its rows instead of paginating).
+    expect(countPdfPages(await renderWeeklySuguanPdf(vm))).toBe(1);
+    // The appended Patotoo pages are ONE per assigned teacher row: A + B + C.
+    expect(slips.length).toBe(22 + 22 + 5);
+    expect(countPdfPages(buffer)).toBe(1 + slips.length);
     expect(buffer.subarray(0, 4).toString()).toBe("%PDF");
   });
 
-  it("layout: one page for a typical 11-dako week with section C populated", async () => {
+  it("layout: one page for a typical 11-dako week, plus one slip page per assignment", async () => {
     const w = await mkWeek(2093, 11);
     for (let i = 1; i <= 11; i++) {
       const d = await mkDako(`PY-${String(i).padStart(2, "0")}`, `Sunday Chapel ${i}`);
@@ -351,8 +368,12 @@ describe("phase 7 — weekly suguan PDF (read-only output layer)", () => {
         await assign(w.id, d.id, t3.id, "RESERBA_II");
       }
     }
-    const { generateWeeklySuguanPdf, countPdfPages } = await import("@/server/services/weekly-suguan-pdf.service");
-    const { buffer } = await generateWeeklySuguanPdf(w.id);
-    expect(countPdfPages(buffer)).toBe(1);
+    const { generateWeeklySuguanPdf, renderWeeklySuguanPdf, countPdfPages } = await import(
+      "@/server/services/weekly-suguan-pdf.service"
+    );
+    const { buffer, vm, slips } = await generateWeeklySuguanPdf(w.id);
+    expect(countPdfPages(await renderWeeklySuguanPdf(vm))).toBe(1);
+    expect(slips.length).toBe(11 + 11 + 3);
+    expect(countPdfPages(buffer)).toBe(1 + slips.length);
   });
 });
