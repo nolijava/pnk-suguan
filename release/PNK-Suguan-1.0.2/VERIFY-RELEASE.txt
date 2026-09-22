@@ -1,0 +1,12 @@
+PNK Suguan 1.0.2 — SHA-256 VERIFICATION
+
+Expected installer SHA-256:
+03fad206d90e1e253f2e0091c35be60a4bf9acbb34a322cd9ddcf9411af24873
+
+Command Prompt:
+  certutil -hashfile "PNK-Suguan-Setup-1.0.2.exe" SHA256
+
+PowerShell:
+  Get-FileHash -Algorithm SHA256 ".\PNK-Suguan-Setup-1.0.2.exe"
+
+The computed hash must match exactly. If it does not match, do not run the installer. Obtain a fresh copy and verify again. No code signature is present in this release.

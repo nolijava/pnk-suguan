@@ -1,0 +1,13 @@
+{
+  "product": "PNK Suguan System",
+  "installerVersion": "1.0.2",
+  "payloadAppVersion": "0.1.1",
+  "payloadBuildId": "20260921180855-ae6670",
+  "payloadFileCount": 5895,
+  "payloadBytes": 255324993,
+  "installerBytes": 91418624,
+  "installerSha256": "03fad206d90e1e253f2e0091c35be60a4bf9acbb34a322cd9ddcf9411af24873",
+  "target": "per-user: %LOCALAPPDATA%\\Programs\\PNK Suguan",
+  "userData": "%LOCALAPPDATA%\\PNK Suguan",
+  "builtAt": "2026-09-21T18:12:13.444Z"
+}

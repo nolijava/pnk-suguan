@@ -1,0 +1,13 @@
+PNK SUGUAN SYSTEM — RELEASE NOTES 1.0.2
+
+Installer/package: 1.0.2
+Application: 0.1.1
+Build ID: 20260921180855-ae6670
+Node: v22.23.2
+PostgreSQL: 16.14
+
+This release packages the accepted Patotoo PDF implementation. Existing Weekly Suguan Page 1 remains unchanged; populated assignment rows receive appended 612 x 936 point pages containing ORIGINAL and DUPLICATE forms.
+
+Security and operation remain loopback-only with existing authentication, sessions, RBAC, scheduling, language, and data-preservation behavior. User data remains under %LOCALAPPDATA%\PNK Suguan\ and is separate from program files.
+
+Known limitations include per-user/HKCU installation, no code signing, no automatic updater, no physical PC/VM clean-machine validation, structural/socket-level offline validation, existing correction-security test-order coupling, one API-gated skipped test when not configured, and stale Next.js static assets after in-place upgrade. No automated Backup/Restore feature exists.

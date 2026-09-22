@@ -1,0 +1,23 @@
+{
+  "product": "PNK Suguan System",
+  "appVersion": "0.1.1",
+  "buildId": "20260921180855-ae6670",
+  "packagedAt": "2026-09-21T18:09:02.872Z",
+  "nodeRuntime": "v22.23.2",
+  "postgresRuntime": "postgres (PostgreSQL) 16.14",
+  "layout": {
+    "programPayload": [
+      "launcher",
+      "node",
+      "postgres",
+      "app"
+    ],
+    "userData": "%LOCALAPPDATA%/PNK Suguan"
+  },
+  "fileCount": 5895,
+  "totalBytes": 255324993,
+  "audit": {
+    "failures": 0,
+    "exclusionsChecked": 20
+  }
+}
