@@ -11,13 +11,18 @@ import { scheduleCorrectionSchema } from "@/lib/validation/query-schemas";
 /**
  * POST /api/weeks/:weekId/correction — Master plan E-1/E-2.
  *
- *   mode=FINALIZED  → ADMIN authorized correction (weeks.unlock + reason).
+ *   mode=FINALIZED  → authorized correction (weeks.unlock: ADMIN, SUPER_ADMIN
+ *                     or SCHEDULER/ENCODER + reason).
  *   mode=PUBLISHED  → SUPER_ADMIN emergency unlock (role + server-verified
  *                     secret + reason). Week status never changes in either
  *                     mode; grants are scoped to this week and TTL-expire.
  *
  * The secret is accepted only in the request body — never in URLs, never
  * logged, never returned.
+ *
+ * The route gate stays `assignments.write` (so the PUBLISHED path keeps its
+ * uniform, no-oracle failure for non-SUPER_ADMIN); the per-mode authorization
+ * is enforced in correction.service.ts.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {

@@ -14,6 +14,8 @@ export type AnnualTypeCode = (typeof ANNUAL_TYPES)[number];
 export interface AnnualAssignmentRow {
   id: string;
   weekNumber: number;
+  /** The lifecycle status of the week this row belongs to (Group 4 gating). */
+  weekStatus?: string;
   dakoId: string;
   dakoCode: string;
   dakoName: string;
@@ -54,11 +56,28 @@ export interface AnnualSchedule {
   year: number;
   /** Real ISO week count — 52 or 53 via isoWeeksInYear; never invented. */
   weekCount: number;
+  /**
+   * ISO week number → that week's lifecycle status, for EVERY week of the year
+   * (supplied by the caller so weeks without assignments are still covered).
+   * Presentation-only: the scheduler and the server remain authoritative.
+   */
+  weekStatusByNumber: Record<number, string>;
   tables: [AnnualTable, AnnualTable, AnnualTable];
 }
 
-export function buildAnnualSchedule(rows: AnnualAssignmentRow[], year: number): AnnualSchedule {
+export function buildAnnualSchedule(
+  rows: AnnualAssignmentRow[],
+  year: number,
+  weekStatuses: { isoWeekNumber: number; status: string }[] = [],
+): AnnualSchedule {
   const weekCount = isoWeeksInYear(year);
+  const weekStatusByNumber: Record<number, string> = {};
+  for (const w of weekStatuses) weekStatusByNumber[w.isoWeekNumber] = w.status;
+  for (const r of rows) {
+    if (r.weekStatus && weekStatusByNumber[r.weekNumber] === undefined) {
+      weekStatusByNumber[r.weekNumber] = r.weekStatus;
+    }
+  }
 
   // Dako master rows seen in the year's data (ACTIVE first-class; a dako that
   // has ANY active-week row is treated as ACTIVE), ordered by dakoCode.
@@ -111,6 +130,7 @@ export function buildAnnualSchedule(rows: AnnualAssignmentRow[], year: number): 
   return {
     year,
     weekCount,
+    weekStatusByNumber,
     tables: [buildTable("SUGO"), buildTable("RESERBA"), buildTable("RESERBA_II")],
   };
 }

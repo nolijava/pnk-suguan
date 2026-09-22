@@ -62,6 +62,10 @@ export default async function SchedulePage({
   // §24 — the PUBLISHED emergency unlock is a SUPER_ADMIN-only entry point;
   // the endpoint re-checks the role and the secret server-side.
   const isSuperAdmin = user.roleCodes.includes("SUPER_ADMIN");
+  // Group 4 — FINALIZED revision uses the existing authorized correction
+  // workflow (weeks.unlock: ADMIN, SUPER_ADMIN and SCHEDULER/ENCODER).
+  // VIEWER does not hold it, and the endpoint re-checks server-side either way.
+  const canRevise = hasPerm(user.roleCodes, "weeks.unlock");
 
   // Week navigation via ISO arithmetic (same as availability page).
   const prevStart = new Date(`${week.startDate}T00:00:00Z`);
@@ -166,6 +170,8 @@ export default async function SchedulePage({
         canPublish={canPublish}
         canPdf={canPdf}
         isSuperAdmin={isSuperAdmin}
+        canRevise={canRevise}
+        currentUserId={user.userId}
         absenceCount={absenceCount.count}
         rows={rows}
         summary={summary}

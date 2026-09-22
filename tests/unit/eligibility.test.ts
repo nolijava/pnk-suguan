@@ -19,9 +19,13 @@ describe("RBAC permission map (§7)", () => {
     expect(hasPermission(["ADMIN"], "users.manage")).toBe(true);
     expect(hasPermission(["ADMIN"], "weeks.unlock")).toBe(true);
   });
-  it("SCHEDULER cannot manage users or unlock", () => {
+  it("SCHEDULER cannot manage users, but DOES hold the L2 unlock lever", () => {
     expect(hasPermission(["SCHEDULER"], "users.manage")).toBe(false);
-    expect(hasPermission(["SCHEDULER"], "weeks.unlock")).toBe(true ? false : false);
+    // L2: FINALIZED revision is authorized by weeks.unlock for SCHEDULER/ENCODER.
+    // (PUBLISHED correction is NOT permission-gated — it stays an explicit
+    // SUPER_ADMIN role check in the service, so this grant cannot widen it.)
+    expect(hasPermission(["SCHEDULER"], "weeks.unlock")).toBe(true);
+    expect(hasPermission(["SCHEDULER"], "weeks.publish")).toBe(false);
     expect(hasPermission(["SCHEDULER"], "teachers.write")).toBe(true);
   });
   it("VIEWER is read-only", () => {

@@ -9,7 +9,7 @@
  * the current week is FINALIZED/PUBLISHED (Invariants 10/11).
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql as drizzleSql } from "drizzle-orm";
 import * as schema from "@/server/db/schema";
 import type { SessionUser } from "@/server/auth/session";
 import { resetTestDb, seedAdmin, seedScheduler, teardown, db } from "./helpers";
@@ -119,9 +119,45 @@ describe("correction architecture — FINALIZED correction, SUPER_ADMIN PUBLISHE
       );
 
   // ------------------------------------------------- E-1 FINALIZED correction
-  it("E-1: non-ADMIN actors cannot begin a FINALIZED correction", async () => {
+  // L2 rule: FINALIZED revision is authorized by `weeks.unlock` — held by
+  // ADMIN, SUPER_ADMIN and SCHEDULER/ENCODER; VIEWER does not hold it.
+  it("E-1: SCHEDULER/ENCODER may begin a FINALIZED revision (weeks.unlock)", async () => {
     const week = await mkWeek(2095, 1);
-    await expect(beginFinalizedCorrection(week.id, "fix", sched)).rejects.toThrow(/administrator/);
+    const res = await beginFinalizedCorrection(week.id, "scheduler begins revision", sched);
+    expect(res.status).toBe("FINALIZED");
+    expect(await isScheduleCorrectionActive(week.id)).toBe(true);
+    expect(await finalizedAudits(week.id)).toHaveLength(1);
+    const after = (await db.select().from(schema.weeks).where(eq(schema.weeks.id, week.id)))[0]!;
+    expect(after.status).toBe("FINALIZED"); // status column untouched
+  });
+
+  it("E-1: VIEWER cannot begin a FINALIZED revision", async () => {
+    const week = await mkWeek(2095, 7);
+    await expect(
+      beginFinalizedCorrection(week.id, "viewer attempt", actor("00000000-0000-0000-0000-0000000000ff", ["VIEWER"])),
+    ).rejects.toThrow(/weeks\.unlock/);
+    expect(await isScheduleCorrectionActive(week.id)).toBe(false);
+    expect(await finalizedAudits(week.id)).toHaveLength(0);
+    const after = (await db.select().from(schema.weeks).where(eq(schema.weeks.id, week.id)))[0]!;
+    expect(after.status).toBe("FINALIZED");
+  });
+
+  it("E-1: a SCHEDULER holding the grant may write and may end it; status stays FINALIZED", async () => {
+    const week = await mkWeek(2095, 8);
+    await beginFinalizedCorrection(week.id, "scheduler correction", sched);
+    const created = await createAssignment(
+      { weekId: week.id, dakoId: filDako.id, teacherId: filTeacher.id, assignmentType: "SUGO" },
+      sched,
+    );
+    expect(created.assignment.assignmentSource).toBe("MANUAL");
+    expect((await db.select().from(schema.weeks).where(eq(schema.weeks.id, week.id)))[0]!.status).toBe(
+      "FINALIZED",
+    );
+    await endScheduleCorrection(week.id, sched);
+    expect(await isScheduleCorrectionActive(week.id)).toBe(false);
+    expect((await db.select().from(schema.weeks).where(eq(schema.weeks.id, week.id)))[0]!.status).toBe(
+      "FINALIZED",
+    );
   });
 
   it("E-1: empty reason rejected; valid begin audited; week STAYS FINALIZED", async () => {
@@ -175,12 +211,60 @@ describe("correction architecture — FINALIZED correction, SUPER_ADMIN PUBLISHE
     });
     await beginFinalizedCorrection(week.id, "fix again", admin);
     process.env.PNK_SCHEDULE_CORRECTION_TTL_MS = "0";
-    // TTL=0 sets expiresAt == startedAt; let the clock advance past that
-    // millisecond so the expiry check (`<`, not `<=`) is deterministic.
-    await new Promise((resolve) => setTimeout(resolve, 3));
+    // TTL=0 is deterministically expired — PostgreSQL compares its own
+    // clock_timestamp() with the audit row's DB-authored created_at, so the
+    // verdict never mixes the database and Node clocks. The UNLOCK row was
+    // written by an earlier statement, so the elapsed interval is > 0 >= TTL.
+    // No sleep, no retry: the old 3 ms setTimeout this replaces only papered
+    // over a clock-offset race (the DB clock runs ~4–11 ms ahead of Node's).
     expect(await isScheduleCorrectionActive(week.id)).toBe(false); // expired
     delete process.env.PNK_SCHEDULE_CORRECTION_TTL_MS;
     process.env.PNK_SCHEDULE_CORRECTION_TTL_MS = "1800000";
+  });
+
+  it("E-1: a database-backdated grant is auto-relocked, a fresh one is live (no sleeps)", async () => {
+    const week = await mkWeek(2095, 9);
+    const saved = process.env.PNK_SCHEDULE_CORRECTION_TTL_MS;
+    process.env.PNK_SCHEDULE_CORRECTION_TTL_MS = "60000"; // 1 minute, explicit
+    try {
+      // Expiry as an EXPLICIT input: the UNLOCK row is an hour old on the
+      // database clock (audit_logs forbids UPDATE/DELETE, not INSERT).
+      await db.insert(schema.auditLogs).values({
+        userId: adminId,
+        action: "FINALIZED_SCHEDULE_UNLOCKED",
+        entityType: "week",
+        entityId: week.id,
+        oldValue: { status: "FINALIZED", assignmentsEditable: false },
+        newValue: { status: "FINALIZED", assignmentsEditable: true },
+        reason: "grant opened an hour ago (fixture)",
+        createdAt: drizzleSql`now() - interval '1 hour'`,
+      });
+      expect(await isScheduleCorrectionActive(week.id)).toBe(false);
+      await expect(assertScheduleCorrectable(db, week.id, admin)).rejects.toThrow(/correction window/);
+      await expect(
+        createAssignment(
+          { weekId: week.id, dakoId: filDako.id, teacherId: filTeacher.id, assignmentType: "SUGO" },
+          admin,
+        ),
+      ).rejects.toThrow(/correction window/);
+
+      // POSITIVE CONTROL — same TTL, same week: a grant that is NOT old still
+      // authorizes writes, so the fix cannot be "always expired".
+      await beginFinalizedCorrection(week.id, "fresh window control", admin);
+      expect(await isScheduleCorrectionActive(week.id)).toBe(true);
+      const created = await createAssignment(
+        { weekId: week.id, dakoId: filDako.id, teacherId: filTeacher.id, assignmentType: "SUGO" },
+        admin,
+      );
+      expect(created.assignment.assignmentSource).toBe("MANUAL");
+      // Week status was never touched by any of this.
+      expect((await db.select().from(schema.weeks).where(eq(schema.weeks.id, week.id)))[0]!.status).toBe("FINALIZED");
+      await endScheduleCorrection(week.id, admin);
+      expect(await isScheduleCorrectionActive(week.id)).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.PNK_SCHEDULE_CORRECTION_TTL_MS;
+      else process.env.PNK_SCHEDULE_CORRECTION_TTL_MS = saved;
+    }
   });
 
   // ------------------------------------------------- E-2 PUBLISHED unlock

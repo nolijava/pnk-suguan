@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq, sql as drizzleSql } from "drizzle-orm";
-import { resetTestDb, seedAdmin, seedScheduler, teardown, db, sql } from "./helpers";
+import { resetTestDb, seedAdmin, seedScheduler, seedSuperAdmin, teardown, db, sql } from "./helpers";
 import * as schema from "@/server/db/schema";
 import { AvailabilityService, WeekService, TeacherService, AssignmentService, DakoService } from "@/server/services";
 import { hasPermission } from "@/server/auth/permissions";
@@ -33,13 +33,16 @@ async function snap() {
 
 let admin: SessionUser;
 let sched: SessionUser;
+let superAdmin: SessionUser;
 
 beforeAll(async () => {
   await resetTestDb();
   const adminId = await seedAdmin();
   const schedId = await seedScheduler();
+  const superAdminId = await seedSuperAdmin();
   admin = actor(adminId, ["ADMIN"]);
   sched = actor(schedId, ["SCHEDULER"]);
+  superAdmin = actor(superAdminId, ["SUPER_ADMIN"]);
 });
 
 afterAll(async () => {
@@ -469,7 +472,7 @@ describe("fill blanks as AVAILABLE (§11 refinement 3)", () => {
   });
 });
 
-describe("PUBLISHED-week locking + ADMIN correction (§8b / refinements 1)", () => {
+describe("PUBLISHED-week locking + SUPER_ADMIN correction (§8b / refinements 1)", () => {
   let teacher: Awaited<ReturnType<typeof TeacherService.createTeacher>>;
   let dako: Awaited<ReturnType<typeof DakoService.createDako>>;
   let week: Awaited<ReturnType<typeof WeekService.getOrCreateWeek>>;
@@ -504,30 +507,35 @@ describe("PUBLISHED-week locking + ADMIN correction (§8b / refinements 1)", () 
     }
   });
 
-  it("correction requires ADMIN (scheduler/viewer forbidden)", async () => {
-    await expect(AvailabilityService.beginAvailabilityCorrection(week.id, "scheduler attempt", sched)).rejects.toThrow(/ADMIN/);
+  // L2 rule: the PUBLISHED availability window is SUPER_ADMIN-only, for BOTH
+  // begin and end. ADMINISTRATOR, SCHEDULER/ENCODER and VIEWER are all refused.
+  it("correction requires SUPER_ADMIN (admin/scheduler/viewer forbidden)", async () => {
+    await expect(AvailabilityService.beginAvailabilityCorrection(week.id, "admin attempt", admin)).rejects.toThrow(/SUPER_ADMIN/);
+    await expect(AvailabilityService.beginAvailabilityCorrection(week.id, "scheduler attempt", sched)).rejects.toThrow(/SUPER_ADMIN/);
     await expect(
-      AvailabilityService.beginAvailabilityCorrection(week.id, "x", actor("00000000-0000-0000-0000-000000000000", ["VIEWER"])),
-    ).rejects.toThrow(/ADMIN/);
+      AvailabilityService.beginAvailabilityCorrection(week.id, "viewer attempt", actor("00000000-0000-0000-0000-0000000000ff", ["VIEWER"])),
+    ).rejects.toThrow(/SUPER_ADMIN/);
+    await expect(AvailabilityService.endAvailabilityCorrection(week.id, admin)).rejects.toThrow(/SUPER_ADMIN/);
+    await expect(AvailabilityService.endAvailabilityCorrection(week.id, sched)).rejects.toThrow(/SUPER_ADMIN/);
   });
 
   it("correction requires a reason; only valid on PUBLISHED weeks", async () => {
-    await expect(AvailabilityService.beginAvailabilityCorrection(week.id, "   ", admin)).rejects.toThrow(/reason/);
+    await expect(AvailabilityService.beginAvailabilityCorrection(week.id, "   ", superAdmin)).rejects.toThrow(/reason/);
     const draftWeek = await WeekService.getOrCreateWeek(2099, 3); // still DRAFT
-    await expect(AvailabilityService.beginAvailabilityCorrection(draftWeek.id, "why unlock a draft?", admin)).rejects.toThrow(/PUBLISHED/);
+    await expect(AvailabilityService.beginAvailabilityCorrection(draftWeek.id, "why unlock a draft?", superAdmin)).rejects.toThrow(/PUBLISHED/);
   });
 
-  it("ADMIN correction allows editing while the week stays PUBLISHED", async () => {
-    await AvailabilityService.beginAvailabilityCorrection(week.id, "absence was misrecorded", admin);
+  it("SUPER_ADMIN correction allows editing while the week stays PUBLISHED", async () => {
+    await AvailabilityService.beginAvailabilityCorrection(week.id, "absence was misrecorded", superAdmin);
 
     // week status untouched
     const w = await WeekService.getWeek(week.id);
     expect(w.status).toBe("PUBLISHED");
 
-    // the granting admin can now edit availability
+    // the granting super admin can now edit availability
     const rec = await AvailabilityService.upsertAvailability(
       { teacherId: teacher.id, weekId: week.id, availabilityStatus: "ABSENT", reason: "corrected reason" },
-      admin,
+      superAdmin,
     );
     expect(rec.availabilityStatus).toBe("ABSENT");
     expect(rec.reason).toBe("corrected reason");
@@ -540,18 +548,18 @@ describe("PUBLISHED-week locking + ADMIN correction (§8b / refinements 1)", () 
     await expect(
       AvailabilityService.upsertAvailability({ teacherId: teacher.id, weekId: week.id, availabilityStatus: "AVAILABLE" }, sched),
     ).rejects.toThrow(/PUBLISHED/);
-    // a second admin (no grant) is also blocked — grant is session-scoped
-    const admin2Id = await seedAdmin();
-    void admin2Id; // seedAdmin caches; use a synthetic distinct admin id instead
-    const otherAdmin = actor("11111111-1111-1111-1111-111111111111", ["ADMIN"]);
+    // a second SUPER_ADMIN without the grant is also blocked — the grant is
+    // holder-scoped, not role-scoped. (Denied path ⇒ no audit row, so a
+    // synthetic user id is safe here.)
+    const otherSuperAdmin = actor("11111111-1111-1111-1111-111111111111", ["SUPER_ADMIN"]);
     await expect(
-      AvailabilityService.upsertAvailability({ teacherId: teacher.id, weekId: week.id, availabilityStatus: "AVAILABLE" }, otherAdmin),
+      AvailabilityService.upsertAvailability({ teacherId: teacher.id, weekId: week.id, availabilityStatus: "AVAILABLE" }, otherSuperAdmin),
     ).rejects.toThrow(/PUBLISHED/);
   });
 
   it("end correction re-locks; corrections cannot begin twice; audited begin+end", async () => {
-    await expect(AvailabilityService.beginAvailabilityCorrection(week.id, "again", admin)).rejects.toThrow(/already active/);
-    await AvailabilityService.endAvailabilityCorrection(week.id, admin);
+    await expect(AvailabilityService.beginAvailabilityCorrection(week.id, "again", superAdmin)).rejects.toThrow(/already active/);
+    await AvailabilityService.endAvailabilityCorrection(week.id, superAdmin);
     expect((await WeekService.getWeek(week.id)).status).toBe("PUBLISHED");
     await expect(
       AvailabilityService.upsertAvailability({ teacherId: teacher.id, weekId: week.id, availabilityStatus: "AVAILABLE" }, admin),
@@ -565,7 +573,7 @@ describe("PUBLISHED-week locking + ADMIN correction (§8b / refinements 1)", () 
     expect(logs).toHaveLength(2);
     expect(logs[0]!.action).toBe("UNLOCKED_AVAILABILITY_CORRECTION");
     expect(logs[0]!.reason).toBe("absence was misrecorded");
-    expect(logs[0]!.userId).toBe(admin.userId);
+    expect(logs[0]!.userId).toBe(superAdmin.userId);
     expect(logs[0]!.createdAt).toBeInstanceOf(Date);
     expect((logs[0]!.oldValue as { status: string }).status).toBe("PUBLISHED");
     expect((logs[0]!.newValue as { availabilityEditable: boolean }).availabilityEditable).toBe(true);
@@ -574,11 +582,11 @@ describe("PUBLISHED-week locking + ADMIN correction (§8b / refinements 1)", () 
   });
 
   it("end correction without an active grant conflicts", async () => {
-    await expect(AvailabilityService.endAvailabilityCorrection(week.id, admin)).rejects.toThrow(/no availability correction/);
+    await expect(AvailabilityService.endAvailabilityCorrection(week.id, superAdmin)).rejects.toThrow(/no availability correction/);
   });
 
   it("PUBLISHED correction does NOT unlock assignments: assertWeekMutable unchanged", async () => {
-    await AvailabilityService.beginAvailabilityCorrection(week.id, "correction does not touch schedule", admin);
+    await AvailabilityService.beginAvailabilityCorrection(week.id, "correction does not touch schedule", superAdmin);
     // assignment writes remain frozen even mid-correction
     await expect(
       AssignmentService.createAssignment({ weekId: week.id, dakoId: dako.id, teacherId: teacher.id, assignmentType: "SUGO" }, admin),
@@ -586,9 +594,9 @@ describe("PUBLISHED-week locking + ADMIN correction (§8b / refinements 1)", () 
     // direct guard check — byte-for-byte Phase 1 behavior
     await expect(WeekService.assertWeekMutable({ ...sql } as never, week.id)).rejects.toThrow();
     // correct a row, week remains PUBLISHED, then end
-    await AvailabilityService.upsertAvailability({ teacherId: teacher.id, weekId: week.id, availabilityStatus: "ABSENT", reason: "still corrected" }, admin);
+    await AvailabilityService.upsertAvailability({ teacherId: teacher.id, weekId: week.id, availabilityStatus: "ABSENT", reason: "still corrected" }, superAdmin);
     expect((await WeekService.getWeek(week.id)).status).toBe("PUBLISHED");
-    await AvailabilityService.endAvailabilityCorrection(week.id, admin);
+    await AvailabilityService.endAvailabilityCorrection(week.id, superAdmin);
   });
 
   it("no Sugo/Reserba/Reserba II rows were created or altered by availability work", async () => {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { StatusBadge } from "../_components/status-badge";
+import { Modal } from "../_components/modal";
 
 export interface SlotRow {
   id: string | null;
@@ -31,6 +32,13 @@ export interface ScheduleActionsProps {
   canPdf: boolean;
   /** Master plan §24 — SUPER_ADMIN-only emergency unlock entry point. */
   isSuperAdmin: boolean;
+  /**
+   * FINALIZED revision entry point: holds `weeks.unlock` (ADMIN, SUPER_ADMIN
+   * and SCHEDULER/ENCODER). VIEWER does not hold it.
+   */
+  canRevise: boolean;
+  /** Needed to match the server rule that only the grant HOLDER may edit. */
+  currentUserId: string;
   absenceCount: number;
   rows: SlotRow[];
   summary: { dakos: number; sugoAssigned: number; reserbaAssigned: number; reserbaIiAssigned: number; unassigned: number } | null;
@@ -101,6 +109,8 @@ export function ScheduleActions({
   canPublish,
   canPdf,
   isSuperAdmin,
+  canRevise,
+  currentUserId,
   absenceCount,
   rows,
   summary,
@@ -134,22 +144,45 @@ export function ScheduleActions({
   // workflow: when an active correction grant is held for this week, cell
   // actions light up (server re-validates via assertScheduleCorrectable).
   // Generation stays DRAFT-only regardless.
-  const [correctionActive, setCorrectionActive] = useState(false);
-  useEffect(() => {
-    if (weekStatus === "DRAFT") return;
-    let alive = true;
-    fetch(`/api/weeks/${weekId}/correction`)
-      .then((r) => r.json())
-      .then((b) => {
-        if (alive && b?.data?.active) setCorrectionActive(true);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
+  const [correction, setCorrection] = useState<{
+    active: boolean;
+    role: "FINALIZED" | "PUBLISHED" | null;
+    holderId: string | null;
+    expiresAt: string | null;
+  }>({ active: false, role: null, holderId: null, expiresAt: null });
+  const correctionActive = correction.active;
+  /** Only the GRANT HOLDER may write — exactly what the server enforces. */
+  const correctionMine = correctionActive && correction.holderId === currentUserId;
+
+  const refreshCorrection = useCallback(async () => {
+    if (weekStatus === "DRAFT") {
+      setCorrection({ active: false, role: null, holderId: null, expiresAt: null });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/weeks/${weekId}/correction`);
+      const body = await res.json();
+      const data = body?.data as
+        | { active?: boolean; role?: "FINALIZED" | "PUBLISHED" | null; holderId?: string | null; expiresAt?: string | null }
+        | undefined;
+      setCorrection({
+        active: Boolean(data?.active),
+        role: data?.role ?? null,
+        holderId: data?.holderId ?? null,
+        expiresAt: data?.expiresAt ?? null,
+      });
+    } catch {
+      /* leave the last known state — the server still decides every mutation */
+    }
   }, [weekId, weekStatus]);
 
-  const editable = canWrite && (!locked || correctionActive);
+  useEffect(() => {
+    void refreshCorrection();
+  }, [refreshCorrection]);
+
+  // DRAFT is normally editable; FINALIZED/PUBLISHED only inside a correction
+  // window held by this user. Generation itself stays DRAFT-only server-side.
+  const editable = canWrite && (!locked || correctionMine);
 
   // ------------------------------------------------------------------
   // §24 SUPER_ADMIN Emergency Correction dialog state. The unlock secret
@@ -216,7 +249,7 @@ export function ScheduleActions({
         setShowEmergency(false);
         setEmergencySecret("");
         setEmergencyReason("");
-        setCorrectionActive(emergencyMode === "begin");
+        await refreshCorrection();
         setMessage({
           kind: "success",
           text:
@@ -278,6 +311,65 @@ export function ScheduleActions({
         setShowAbsentWarning(true);
       } else {
         generate();
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // FINALIZED revision (Group 4) — the approved correction workflow, now with
+  // a UI entry point. The week REMAINS FINALIZED throughout; only the caller's
+  // authorized, audited, TTL-scoped window makes its assignments writable.
+  // Roles: any `weeks.unlock` holder (ADMIN, SUPER_ADMIN, SCHEDULER/ENCODER).
+  // PUBLISHED is untouched: it still requires the SUPER_ADMIN emergency unlock
+  // with the server-verified secret.
+  // ------------------------------------------------------------------
+  const [showRevision, setShowRevision] = useState(false);
+  const [revisionMode, setRevisionMode] = useState<"begin" | "end">("begin");
+  const [revisionReason, setRevisionReason] = useState("");
+  const [revisionErr, setRevisionErr] = useState<string | null>(null);
+
+  function openRevisionDialog(mode: "begin" | "end") {
+    setMessage(null);
+    setRevisionErr(null);
+    setRevisionReason("");
+    setRevisionMode(mode);
+    setShowRevision(true);
+  }
+
+  function submitRevision() {
+    setRevisionErr(null);
+    if (revisionMode === "begin" && !revisionReason.trim()) {
+      setRevisionErr("A reason is required and audited.");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/weeks/${weekId}/correction`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(
+            revisionMode === "begin"
+              ? { mode: "FINALIZED", action: "begin", reason: revisionReason.trim() }
+              : { mode: "FINALIZED", action: "end" },
+          ),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          setRevisionErr(body?.error?.message ?? "revision request failed");
+          return;
+        }
+        setShowRevision(false);
+        setRevisionReason("");
+        await refreshCorrection();
+        setMessage({
+          kind: "success",
+          text:
+            revisionMode === "begin"
+              ? "Revision enabled — the week remains FINALIZED and every change inside the window is audited."
+              : "Revision window ended — the FINALIZED schedule is locked again.",
+        });
+      } catch {
+        setRevisionErr("network error — revision not changed");
       }
     });
   }
@@ -519,6 +611,16 @@ export function ScheduleActions({
           {canPublish && weekStatus === "FINALIZED" ? (
             <button type="button" className="btn btn-secondary" onClick={publish} disabled={pending}>Publish</button>
           ) : null}
+          {canRevise && weekStatus === "FINALIZED" && !correctionActive ? (
+            <button type="button" className="btn btn-secondary" onClick={() => openRevisionDialog("begin")} disabled={pending}>
+              Enable Revision…
+            </button>
+          ) : null}
+          {canRevise && weekStatus === "FINALIZED" && correctionActive ? (
+            <button type="button" className="btn btn-secondary" onClick={() => openRevisionDialog("end")} disabled={pending}>
+              End Revision…
+            </button>
+          ) : null}
           {isSuperAdmin && weekStatus === "PUBLISHED" ? (
             /* §24 — the only UI entry point for a PUBLISHED unlock. */
             <button type="button" className="btn btn-secondary" onClick={openEmergencyDialog} disabled={pending}>
@@ -564,8 +666,12 @@ export function ScheduleActions({
               ? "PUBLISHED — SUPER_ADMIN correction window active; changes are audited. The week remains PUBLISHED."
               : "PUBLISHED — this schedule is immutable. Corrections require the authorized correction workflow."
             : correctionActive
-              ? "FINALIZED — authorized correction window active; changes are audited. Generation stays locked."
-              : "FINALIZED — generation is locked; authorized corrections may still be applied."}
+              ? `FINALIZED — revision window active${correctionMine ? " (held by you)" : " (held by another user)"}${
+                  correction.expiresAt ? ` · expires ${new Date(correction.expiresAt).toISOString().slice(11, 16)} UTC` : ""
+                }; changes are audited and the week stays FINALIZED.`
+              : canRevise
+                ? "FINALIZED — generation is locked. Use Enable Revision to make audited corrections; the week stays FINALIZED."
+                : "FINALIZED — generation is locked; authorized corrections may still be applied by an administrator."}
         </p>
       ) : null}
 
@@ -636,6 +742,7 @@ export function ScheduleActions({
           secret lives only in the POST body and is cleared from state after
           every attempt (success or failure). */}
       {showEmergency ? (
+        <Modal open onClose={closeEmergencyDialog}>
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Emergency Schedule Correction">
           <div className="modal">
             <h2>Emergency Schedule Correction</h2>
@@ -687,9 +794,63 @@ export function ScheduleActions({
             </div>
           </div>
         </div>
+        </Modal>
+      ) : null}
+
+      {showRevision ? (
+        <Modal open onClose={() => setShowRevision(false)}>
+          <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Enable FINALIZED schedule revision">
+            <div className="modal">
+              <h2>{revisionMode === "begin" ? "Enable Revision" : "End Revision"}</h2>
+              {revisionMode === "begin" ? (
+                <>
+                  <p>
+                    Open an authorized correction window for the <strong>FINALIZED</strong> schedule of Week {weekNumber} ·{" "}
+                    {weekYear}.
+                  </p>
+                  <p className="info-note">
+                    The week stays <strong>FINALIZED</strong> — no status change, no revert to DRAFT, and generation remains
+                    locked. The window is scoped to this week, expires automatically, and only you can write inside it. Every
+                    change is audited, and rules that no override can bypass (e.g. a Filipino teacher at an English dako) stay
+                    impossible.
+                  </p>
+                  <label>
+                    Reason (required, audited)
+                    <textarea
+                      rows={3}
+                      value={revisionReason}
+                      onChange={(e) => setRevisionReason(e.target.value)}
+                      disabled={pending}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <p>
+                    End the open revision window for Week {weekNumber} · {weekYear}?
+                  </p>
+                  <p className="info-note">
+                    Assignments become read-only again immediately. The week stays <strong>FINALIZED</strong>; ending the window
+                    is audited.
+                  </p>
+                </>
+              )}
+              {revisionErr ? <p className="error">{revisionErr}</p> : null}
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowRevision(false)} disabled={pending}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" onClick={submitRevision} disabled={pending}>
+                  {revisionMode === "begin" ? "Enable Revision" : "End Revision"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       {showAbsentWarning ? (
+        <Modal open onClose={() => setShowAbsentWarning(false)}>
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Previous Week Availability Notice">
           <div className="modal">
             <h2>Previous Week Availability Notice</h2>
@@ -709,9 +870,11 @@ export function ScheduleActions({
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {slot ? (
+        <Modal open onClose={closeSlotDialog}>
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={slot.mode === "delegate" ? "Manual Assignment" : "Manual Assignment Override"}>
           <div className="modal">
             <h2>{slot.mode === "delegate" ? "Manual Assignment" : "Manual Assignment Override"}</h2>
@@ -900,9 +1063,11 @@ export function ScheduleActions({
             )}
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {showUnavailable ? (
+        <Modal open onClose={() => setShowUnavailable(false)}>
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Unavailable teachers">
           <div className="modal">
             <h2>View Unavailable Teachers</h2>
@@ -933,6 +1098,7 @@ export function ScheduleActions({
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
     </>
   );

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, eq } from "drizzle-orm";
 import { requirePermission } from "@/server/auth/guard";
 import { AssignmentService } from "@/server/services";
+import { listActiveScheduleCorrections } from "@/server/services/correction.service";
 import { getDb } from "@/server/db/client";
 import { weeks } from "@/server/db/schema";
 import { buildAnnualSchedule } from "@/lib/annual";
@@ -38,7 +39,12 @@ export default async function DashboardPage({
   // The selected year drives ALL THREE annual tables (§4).
   const year = flat.year !== undefined ? Number(flat.year) : cur.year;
   const rows = await AssignmentService.listAssignmentsForYear(year);
-  const schedule = buildAnnualSchedule(rows, year);
+  // Group 4 — the matrix needs each week's lifecycle status plus any OPEN
+  // correction window (holder included) to decide which cells may be opened.
+  // Both are single batched queries; no per-cell or per-week round trips.
+  const weekStatuses = await AssignmentService.listWeekStatusesForYear(year);
+  const openCorrections = await listActiveScheduleCorrections(weekStatuses.map((w) => w.id));
+  const schedule = buildAnnualSchedule(rows, year, weekStatuses);
   // Phase 6 §6/§7/§13/§14 — persisted absence/modification provenance for cell
   // tooltips (batched; viewing stays read-only).
   const cellInfo = await AssignmentService.getAnnualCellInfo(year);
@@ -156,6 +162,15 @@ export default async function DashboardPage({
           currentIsoLabel={`W${cur.week} · ${cur.year}`}
           cellInfo={cellInfo}
           writable={writable}
+          currentUserId={user.userId}
+          correctionsByWeek={Object.fromEntries(
+            weekStatuses.map((w) => [
+              w.isoWeekNumber,
+              openCorrections[w.id]
+                ? { active: true, holderId: openCorrections[w.id]!.holderId, role: openCorrections[w.id]!.role }
+                : { active: false, holderId: null, role: null },
+            ]),
+          )}
         />
       </section>
 

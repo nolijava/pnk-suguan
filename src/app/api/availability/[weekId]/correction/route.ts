@@ -5,9 +5,12 @@ import { isAvailabilityCorrectionActive } from "@/server/services/availability.s
 import { availabilityCorrectionSchema } from "@/lib/validation/query-schemas";
 
 /**
- * POST /api/availability/:weekId/correction — §8b ADMIN-only correction window
- * for a PUBLISHED week. Week status remains PUBLISHED; only availability
- * editing is temporarily permitted for the granting ADMIN. Audited begin/end.
+ * POST /api/availability/:weekId/correction — §8b SUPER_ADMIN-only correction
+ * window for a PUBLISHED week. Week status remains PUBLISHED; only availability
+ * editing is temporarily permitted for the granting SUPER_ADMIN. Audited
+ * begin/end. Mirrors the PUBLISHED schedule correction: the route gate is the
+ * operation permission (`availability.write`) and the role is enforced in
+ * availability.service.ts.
  */
 export async function POST(
   req: Request,

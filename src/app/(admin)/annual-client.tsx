@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AnnualSchedule } from "@/lib/annual";
+import { Modal } from "./_components/modal";
 
 const TYPE_LABEL: Record<string, string> = {
   SUGO: "SUGO",
@@ -47,6 +48,20 @@ export interface AnnualTablesProps {
   cellInfo: { absentInfo: CellAbsentInfo[]; modifiedInfo: CellModifiedInfo[] };
   /** Whether the current user may open the action prompt (server still enforces). */
   writable: boolean;
+  /** Needed to match the server rule that only the grant HOLDER may write. */
+  currentUserId: string;
+  /**
+   * Group 4 — per-week correction-window state (one batched lookup, never per
+   * cell). A WEEK's status decides whether its cells can be opened at all:
+   *   DRAFT     → interactive as before
+   *   FINALIZED → only inside a revision window held by this user
+   *   PUBLISHED → never interactive here (the SUPER_ADMIN emergency workflow
+   *               lives on the Weekly Schedule page)
+   */
+  correctionsByWeek: Record<
+    number,
+    { active: boolean; holderId: string | null; role: "FINALIZED" | "PUBLISHED" | null }
+  >;
 }
 
 interface ReplacementCandidate {
@@ -89,7 +104,15 @@ function fmtDate(d: string | Date): string {
  * Clear and Modify run the §3-§14 server workflows via the Phase 6 APIs.
  * Absence and modification provenance come from persisted audit data (§7/§14).
  */
-export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellInfo, writable }: AnnualTablesProps) {
+export function AnnualTables({
+  schedule,
+  currentWeekKey,
+  currentIsoLabel,
+  cellInfo,
+  writable,
+  currentUserId,
+  correctionsByWeek,
+}: AnnualTablesProps) {
   const router = useRouter();
   const wrapRefs = useRef<(HTMLDivElement | null)[]>([]);
   const syncing = useRef(false);
@@ -121,6 +144,39 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
   const [customReason, setCustomReason] = useState<string>("");
   const [replacementId, setReplacementId] = useState<string>("");
 
+  // --- Group 4: week-status gating for cell interactivity -------------------
+  // Mirrors the server exactly (assertScheduleCorrectable): DRAFT is open,
+  // FINALIZED/PUBLISHED require a correction window held by this user.
+  const weekStatusOf = (weekNumber: number) => schedule.weekStatusByNumber[weekNumber] ?? "DRAFT";
+  const windowFor = (weekNumber: number) => correctionsByWeek[weekNumber];
+  const canOpenWeek = (weekNumber: number) => {
+    const status = weekStatusOf(weekNumber);
+    if (status === "DRAFT") return true;
+    const w = windowFor(weekNumber);
+    return Boolean(w?.active && w.holderId === currentUserId);
+  };
+  /** Non-color lock indicator + explanation for a locked week. */
+  const lockLabelOf = (weekNumber: number): string | null => {
+    const status = weekStatusOf(weekNumber);
+    if (status === "PUBLISHED") return "PUBLISHED";
+    if (status === "FINALIZED") return "FINALIZED";
+    return null;
+  };
+  const lockNoteOf = (weekNumber: number): string | null => {
+    const status = weekStatusOf(weekNumber);
+    if (status === "DRAFT") return null;
+    const w = windowFor(weekNumber);
+    if (w?.active && w.holderId === currentUserId) return null;
+    if (status === "PUBLISHED") {
+      return w?.active
+        ? "PUBLISHED — correction window is held by another user; changes run through the Weekly Schedule."
+        : "PUBLISHED — this week is locked. Corrections require the SUPER_ADMIN emergency workflow on the Weekly Schedule page.";
+    }
+    return w?.active
+      ? "FINALIZED — a revision window is open for another user; changes run through the Weekly Schedule."
+      : "FINALIZED — enable revision on the Weekly Schedule page to make audited corrections. The week stays FINALIZED.";
+  };
+
   const effectiveReason = () => (reasonChoice === "Other" ? customReason.trim() : reasonChoice);
 
   function closeModal() {
@@ -134,7 +190,9 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
 
   /** §2 — clicking an assigned cell opens the prompt; nothing mutates yet. */
   function openAction(dakoId: string, dakoName: string, weekNumber: number, type: string, cell: { id: string | null; teacherName: string | null; teacherCode: string | null; source: string | null }) {
-    if (!writable || !cell.id || !cell.teacherName || busy) return;
+    // The week's lifecycle gate is checked here as well as at render time, so a
+    // stale render can never open a locked week's dialog.
+    if (!writable || !canOpenWeek(weekNumber) || !cell.id || !cell.teacherName || busy) return;
     setError(null);
     setStep({
       kind: "action",
@@ -198,15 +256,8 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
     return json.data;
   }
 
-  // --- keyboard: Escape closes any open dialog (cancel = no mutation) -------
-  useEffect(() => {
-    if (step.kind === "none") return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeModal();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [step.kind]);
+  // Keyboard: Escape closes any open dialog (cancel = no mutation). Handled by
+  // the shared <Modal> layer, which also locks page scroll and restores focus.
 
   // --- lookup maps for badges/tooltips --------------------------------------
   const absentByKey = useMemo(() => {
@@ -476,9 +527,13 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                         const absent = absentByKey.get(`${d.dakoId}|${i + 1}|${table.assignmentType}`);
                         const modified = modifiedByAssignment.get(c.id ?? "");
                         return (
-                          <td key={i} className={currentWeekKey === weekLabel(i + 1) ? "current-week" : undefined}>
+                          <td
+                            key={i}
+                            className={currentWeekKey === weekLabel(i + 1) ? "current-week" : undefined}
+                            title={lockNoteOf(i + 1) ?? undefined}
+                          >
                             {c.teacherName ? (
-                              writable ? (
+                              writable && canOpenWeek(i + 1) ? (
                                 <button
                                   type="button"
                                   className="cell-btn"
@@ -505,6 +560,9 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
                                 <span className="cell-static" tabIndex={0}>
                                   <span>{c.teacherName}</span>
                                   {c.source && c.source !== "AUTO" ? <SourceBadge source={c.source} /> : null}
+                                  {lockLabelOf(i + 1) ? (
+                                    <span className="badge badge-gray">{lockLabelOf(i + 1)}</span>
+                                  ) : null}
                                   {modified ? <UpdatedBadge /> : null}
                                   {absent ? <AbsentBadge /> : null}
                                   {absent || modified ? (
@@ -546,6 +604,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
 
       {/* ---------------- dialogs ---------------- */}
       {step.kind === "action" ? (
+        <Modal open onClose={closeModal}>
         <div className="modal-backdrop" role="presentation" onClick={closeModal}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cell-action-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="cell-action-title">What would you like to do?</h3>
@@ -566,9 +625,11 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {step.kind === "clear-reason" ? (
+        <Modal open onClose={closeModal}>
         <div className="modal-backdrop" role="presentation" onClick={closeModal}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="clear-reason-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="clear-reason-title">Reason required</h3>
@@ -625,9 +686,11 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {step.kind === "absent-reason" ? (
+        <Modal open onClose={closeModal}>
         <div className="modal-backdrop" role="presentation" onClick={closeModal}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="absent-reason-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="absent-reason-title">{step.mode === "clear" ? "Absence reason" : "Unable to attend class due to:"}</h3>
@@ -706,9 +769,11 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
 
       {step.kind === "replacement" ? (
+        <Modal open onClose={closeModal}>
         <div className="modal-backdrop" role="presentation" onClick={closeModal}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="replacement-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="replacement-title">Select replacement teacher</h3>
@@ -769,6 +834,7 @@ export function AnnualTables({ schedule, currentWeekKey, currentIsoLabel, cellIn
             </div>
           </div>
         </div>
+        </Modal>
       ) : null}
     </section>
   );

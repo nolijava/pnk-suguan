@@ -15,6 +15,7 @@ export const sql = postgres(TEST_URL, { max: 1, prepare: false });
 export const db = drizzle(sql, { schema });
 
 let adminId: string | undefined;
+let superAdminId: string | undefined;
 
 /** Per-test-file: truncate operational tables, create a fresh ADMIN user. */
 export async function resetTestDb(): Promise<void> {
@@ -22,6 +23,7 @@ export async function resetTestDb(): Promise<void> {
     dako_anniversary_notifications, audit_logs, sessions, password_reset_challenges,
     user_roles, teachers, dako, weeks, users RESTART IDENTITY CASCADE`;
   adminId = undefined;
+  superAdminId = undefined;
 }
 
 export async function seedAdmin(): Promise<string> {
@@ -35,6 +37,25 @@ export async function seedAdmin(): Promise<string> {
   const roleRows = await db.select().from(schema.roles).where(eq(schema.roles.code, "ADMIN"));
   await db.insert(schema.userRoles).values({ userId: user.id, roleId: roleRows[0]!.id });
   adminId = user.id;
+  return user.id;
+}
+
+/**
+ * A REAL super-admin user row. Needed (not a synthetic id) wherever the actor is
+ * the GRANT HOLDER, because audit_logs.user_id has an FK to users.id — a
+ * synthetic id would violate it as soon as an audit row is written.
+ */
+export async function seedSuperAdmin(): Promise<string> {
+  if (superAdminId) return superAdminId;
+  const passwordHash = await hashPassword("TestSuperPass1!");
+  const inserted = await db
+    .insert(schema.users)
+    .values({ email: "super@test.local", fullName: "Test Super Admin", passwordHash })
+    .returning();
+  const user = inserted[0]!;
+  const roleRows = await db.select().from(schema.roles).where(eq(schema.roles.code, "SUPER_ADMIN"));
+  await db.insert(schema.userRoles).values({ userId: user.id, roleId: roleRows[0]!.id });
+  superAdminId = user.id;
   return user.id;
 }
 

@@ -50,12 +50,13 @@ export function resolveEffectiveStatus(
 // The ACTIVE-GRANT STATE IS DERIVED from the append-only audit trail: the
 // latest UNLOCKED/ENDED correction audit row for the week decides. This is
 // correct across Next.js route bundles (no shared module state), survives
-// server restarts, and needs no schema change. Grants are ADMIN-scoped with a
-// 30-minute TTL (measured from the audit row's timestamp).
+// server restarts, and needs no schema change. Grants are SUPER_ADMIN-scoped
+// with a 30-minute TTL (measured from the audit row's timestamp).
 // ---------------------------------------------------------------------------
 
 interface CorrectionGrant {
   weekId: string;
+  /** Grant holder's user id (the SUPER_ADMIN who opened the window). */
   adminId: string;
   reason: string;
   startedAt: Date;
@@ -71,12 +72,23 @@ const CORRECTION_ACTIONS = ["UNLOCKED_AVAILABILITY_CORRECTION", "ENDED_AVAILABIL
 
 async function activeCorrection(tx: Database | undefined, weekId: string): Promise<CorrectionGrant | null> {
   const db = tx ?? getDb();
+  const ttl = correctionTtlMs();
   const rows = await db
     .select({
       action: auditLogs.action,
       userId: auditLogs.userId,
       reason: auditLogs.reason,
       createdAt: auditLogs.createdAt,
+      // ONE CLOCK DOMAIN: the TTL verdict is decided BY POSTGRESQL, which
+      // compares its own clock_timestamp() against the audit row's DB-authored
+      // created_at. Node's Date.now() is never compared with a database
+      // timestamp — the PostgreSQL and Node clocks differ by a measured 4–11 ms
+      // on this project's clusters, which is enough for a TTL=0 grant to read
+      // as "still active" and intermittently authorize a write. `elapsed >= ttl`
+      // is exactly `created_at + ttl <= now`: no grace period, and TTL=0 is
+      // deterministically expired (the row was written by an earlier statement,
+      // so the elapsed interval is strictly positive).
+      expired: sql<boolean>`extract(epoch from (clock_timestamp() - ${auditLogs.createdAt})) * 1000 >= ${ttl}`,
     })
     .from(auditLogs)
     .where(
@@ -90,9 +102,11 @@ async function activeCorrection(tx: Database | undefined, weekId: string): Promi
     .limit(1);
   const last = rows[0];
   if (!last || last.action !== "UNLOCKED_AVAILABILITY_CORRECTION") return null;
+  if (last.expired) return null; // TTL elapsed → locked again (DB-decided, see above)
   const startedAt = last.createdAt;
-  const expiresAt = new Date(startedAt.getTime() + correctionTtlMs());
-  if (expiresAt.getTime() < Date.now()) return null; // TTL elapsed → locked again
+  // Display value only — derived from the DB-authored start, never used as a
+  // gate (the gate is the boolean PostgreSQL computed above).
+  const expiresAt = new Date(startedAt.getTime() + ttl);
   return { weekId, adminId: last.userId ?? "", reason: last.reason ?? "", startedAt, expiresAt };
 }
 
@@ -105,17 +119,21 @@ export async function correctionGrantHolder(weekId: string): Promise<string | nu
 }
 
 /**
- * ADMIN-only: allow availability corrections on a PUBLISHED week. Requires a
- * reason; audited. Serialized on the week row (FOR UPDATE) so concurrent
- * begin/end/write requests cannot double-open or race the state machine.
+ * SUPER_ADMIN-only: allow availability corrections on a PUBLISHED week.
+ * Requires a reason; audited. Serialized on the week row (FOR UPDATE) so
+ * concurrent begin/end/write requests cannot double-open or race the state
+ * machine. ADMINISTRATOR, SCHEDULER/ENCODER and VIEWER are refused: the
+ * PUBLISHED lock is SUPER_ADMIN-only, mirroring the schedule correction.
  */
 export async function beginAvailabilityCorrection(
   weekId: string,
   reason: string,
   actor: SessionUser,
 ): Promise<{ weekId: string; expiresAt: Date }> {
-  if (!actor.roleCodes.includes("ADMIN")) {
-    throw new ForbiddenError("only ADMIN can begin an availability correction on a PUBLISHED week");
+  if (!actor.roleCodes.includes("SUPER_ADMIN")) {
+    throw new ForbiddenError(
+      "only SUPER_ADMIN can begin an availability correction on a PUBLISHED week",
+    );
   }
   if (!reason || !reason.trim()) {
     throw new ValidationError("reason is required to unlock availability for correction");
@@ -150,10 +168,13 @@ export async function beginAvailabilityCorrection(
   });
 }
 
-/** ADMIN-only: end the correction window; the week returns to locked PUBLISHED. Audited. */
+/**
+ * SUPER_ADMIN-only: end the correction window; the week returns to locked
+ * PUBLISHED. Audited.
+ */
 export async function endAvailabilityCorrection(weekId: string, actor: SessionUser): Promise<void> {
-  if (!actor.roleCodes.includes("ADMIN")) {
-    throw new ForbiddenError("only ADMIN can end an availability correction");
+  if (!actor.roleCodes.includes("SUPER_ADMIN")) {
+    throw new ForbiddenError("only SUPER_ADMIN can end an availability correction");
   }
   return withTransaction(async (tx) => {
     const locked = await tx
@@ -178,7 +199,7 @@ export async function endAvailabilityCorrection(weekId: string, actor: SessionUs
   });
 }
 
-/** PUBLISHED weeks are locked unless an ADMIN correction grant covers this actor. */
+/** PUBLISHED weeks are locked unless a SUPER_ADMIN correction grant covers this actor. */
 async function assertAvailabilityEditable(
   week: { id: string; status: string },
   actor: SessionUser,
@@ -187,7 +208,7 @@ async function assertAvailabilityEditable(
   const grant = await activeCorrection(undefined, week.id);
   if (!grant || grant.adminId !== actor.userId) {
     throw new ConflictError(
-      "week is PUBLISHED; availability is locked (ADMIN correction required)",
+      "week is PUBLISHED; availability is locked (SUPER_ADMIN correction required)",
     );
   }
 }

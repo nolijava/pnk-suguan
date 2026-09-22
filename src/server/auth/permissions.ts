@@ -32,10 +32,13 @@ const ADMIN: Permission[] = [
   "audit.read", "reports.read",
 ];
 
+// SCHEDULER/ENCODER may encode AND revise schedules. `weeks.unlock` authorizes
+// the FINALIZED revision window only; it never grants finalize, publish, or the
+// PUBLISHED correction (SUPER_ADMIN-only) and it is not held by VIEWER.
 const SCHEDULER: Permission[] = [
   "teachers.read", "teachers.write",
   "dako.read", "dako.write",
-  "weeks.read", "weeks.write",
+  "weeks.read", "weeks.write", "weeks.unlock",
   "availability.read", "availability.write",
   "assignments.read", "assignments.write",
   "assignments.history.read", "assignments.counts.read",

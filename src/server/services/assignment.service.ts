@@ -667,6 +667,10 @@ export async function listAssignmentsForYear(year: number) {
       id: assignments.id,
       weekId: assignments.weekId,
       weekNumber: weeks.isoWeekNumber,
+      // Group 4 — the week's lifecycle status travels with every row so the
+      // annual matrix can gate cells on the SAME rule the server enforces
+      // (DRAFT open, FINALIZED/PUBLISHED locked outside a correction window).
+      weekStatus: weeks.status,
       dakoId: assignments.dakoId,
       dakoCode: dako.dakoCode,
       dakoName: dako.name,
@@ -684,6 +688,19 @@ export async function listAssignmentsForYear(year: number) {
     .innerJoin(teachers, eq(teachers.id, assignments.teacherId))
     .where(eq(weeks.year, year))
     .orderBy(weeks.isoWeekNumber, dako.dakoCode, assignments.assignmentType);
+}
+
+/**
+ * Group 4 — every week row of an ISO year (id + number + status) in ONE query.
+ * The dashboard needs the status of ALL weeks, including weeks that hold no
+ * assignments, to decide whether a matrix cell may be opened at all.
+ */
+export async function listWeekStatusesForYear(year: number) {
+  return getDb()
+    .select({ id: weeks.id, isoWeekNumber: weeks.isoWeekNumber, status: weeks.status })
+    .from(weeks)
+    .where(eq(weeks.year, year))
+    .orderBy(weeks.isoWeekNumber);
 }
 
 export async function listAssignmentsForWeek(weekId: string) {

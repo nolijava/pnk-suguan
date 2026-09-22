@@ -86,7 +86,9 @@ export default async function AvailabilityPage({
   ]);
 
   const canWrite = hasPermission(user.roleCodes, "availability.write");
-  const isAdmin = user.roleCodes.includes("ADMIN");
+  // §8b — the PUBLISHED availability correction window is SUPER_ADMIN-only.
+  // The service enforces the same rule server-side; this only gates the UI.
+  const isSuperAdmin = user.roleCodes.includes("SUPER_ADMIN");
 
   // Week navigation links via ISO arithmetic — no weeks created just by rendering nav.
   const prevStart = new Date(`${week.startDate}T00:00:00Z`);
@@ -208,8 +210,8 @@ export default async function AvailabilityPage({
         weekStatus={week.status as "DRAFT" | "FINALIZED" | "PUBLISHED"}
         canWrite={canWrite}
         canEditNow={canWrite && (week.status !== "PUBLISHED" || (correctionActive && correctionHolder === user.userId))}
-        canBeginCorrection={canWrite && isAdmin && week.status === "PUBLISHED" && !correctionActive}
-        canEndCorrection={canWrite && isAdmin && correctionActive && correctionHolder === user.userId}
+        canBeginCorrection={canWrite && isSuperAdmin && week.status === "PUBLISHED" && !correctionActive}
+        canEndCorrection={canWrite && isSuperAdmin && correctionActive && correctionHolder === user.userId}
         fillBlankCount={fillBlankCount}
       />
     </>
