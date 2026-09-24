@@ -261,8 +261,16 @@ if (secretShaped.length) bad(`credential-shaped files in package: ${secretShaped
 else ok("no credential or environment files in package");
 
 // (c) the dev data trees and tooling workspace must be absent
+//     `backups` is also the name of a REAL API route (src/app/api/backups — the
+//     backup feature), so Next's build output legitimately carries it as a path
+//     segment (app/.next/server/app/api/backups/...). Build output is produced
+//     entirely by `next build` and cannot contain development data, so it is
+//     exempt from that one word here — a real backups/ directory could never
+//     live under app/.next/.
 for (const forbidden of ["pgdata", "pnk-dev", "pnk-test", "backups", ".freebuff"]) {
-  const hit = files.filter((f) => f.includes(forbidden));
+  const hit = files.filter(
+    (f) => f.includes(forbidden) && !(forbidden === "backups" && f.startsWith("app/.next/")),
+  );
   if (hit.length) bad(`development data present: ${hit.slice(0, 3).join(", ")}`);
 }
 ok("no development data directories, clusters, or backups");

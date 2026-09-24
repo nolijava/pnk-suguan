@@ -33,9 +33,9 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("PNK Suguan System Setup")]
 [assembly: AssemblyProduct("PNK Suguan")]
 [assembly: AssemblyCompany("RetsLi")]
-[assembly: AssemblyVersion("1.0.3.0")]
-[assembly: AssemblyFileVersion("1.0.3.0")]
-[assembly: AssemblyInformationalVersion("1.0.3")]
+[assembly: AssemblyVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
+[assembly: AssemblyInformationalVersion("2.0.0")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.0")]
 
 namespace PnkSuguanSetup
@@ -43,12 +43,14 @@ namespace PnkSuguanSetup
     internal static class Program
     {
         private const string APP_NAME = "PNK Suguan";
-        private const string APP_VERSION = "1.0.3";
+        private const string APP_VERSION = "2.0.0";
         private const string UNINSTALL_SUBKEY = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\PNK Suguan";
         private const string PAYLOAD_RESOURCE = "payload.zip";
         private const string PAYLOAD_SIBLING = "payload.zip";
         private const string LAUNCHER_ENTRY = "Start PNK Suguan.cmd";
         private const string UNINSTALLER_EXE = "Uninstall PNK Suguan.exe";
+        /// <summary>Shipped multi-resolution brand icon, inside the program payload.</summary>
+        private const string BRAND_ICON = "pnk-suguan.ico";
 
         private static int Main(string[] args)
         {
@@ -323,13 +325,29 @@ namespace PnkSuguanSetup
             {
                 string parent = Path.GetDirectoryName(linkPath);
                 if (parent != null && !Directory.Exists(parent)) Directory.CreateDirectory(parent);
-                ComShortcut.Create(linkPath, target, null, workDir, target + ",0");
+                // The entry point is a .cmd, which carries no icon resource of its
+                // own — without an explicit IconLocation Windows would show the
+                // generic batch-file icon. Point at the shipped brand icon, and
+                // fall back to the target's own icon only if it is missing.
+                string icon = BrandIconPath(workDir);
+                ComShortcut.Create(linkPath, target, null, workDir, icon != null ? icon + ",0" : target + ",0");
                 Console.WriteLine("     " + what + ": " + Path.GetFileName(linkPath));
             }
             catch (Exception ex)
             {
                 Warn("could not create the " + what + " shortcut: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Path to the shipped brand icon (public/logo/pnk-suguan.ico in the
+        /// repository, app/public/logo/ inside the payload), or null when it is
+        /// absent so callers can fall back to the target's own icon.
+        /// </summary>
+        private static string BrandIconPath(string installDir)
+        {
+            string icon = Path.Combine(installDir, Path.Combine(Path.Combine("app", "public"), Path.Combine("logo", BRAND_ICON)));
+            return File.Exists(icon) ? icon : null;
         }
 
         private static void RemoveShortcuts()

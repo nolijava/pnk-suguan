@@ -1,6 +1,6 @@
 {
   "name": "pnk-suguan-system",
-  "version": "0.1.2",
+  "version": "2.0.0",
   "private": true,
   "description": "PNK Teacher Assignment & Suguan Management System — Phase 1 foundation",
   "engines": {
@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:int": "vitest run tests/int",
+    "test:e2e": "playwright test",
     "setup:db": "node scripts/portable-pg.mjs install",
     "db:test-up": "node scripts/portable-pg.mjs start-test",
     "db:test-down": "node scripts/portable-pg.mjs stop-test",
@@ -24,7 +25,8 @@
     "db:migrate-test": "tsx scripts/migrate.ts --database-url %TEST_DATABASE_URL%",
     "package:win": "node scripts/package-windows.mjs",
     "setup:admin": "tsx scripts/setup-admin.ts",
-    "setup:test-admin": "tsx scripts/setup-admin.ts --database-url %TEST_DATABASE_URL% --email admin@pnk.test --password testPass123!"
+    "setup:test-admin": "tsx scripts/setup-admin.ts --database-url %TEST_DATABASE_URL% --email admin@pnk.test --password testPass123!",
+    "logo": "node scripts/generate-logo.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
@@ -39,6 +41,7 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.15.0",
     "@types/nodemailer": "^8.0.2",
     "@types/pdfkit": "^0.17.6",
