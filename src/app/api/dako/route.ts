@@ -13,7 +13,7 @@ export async function GET(req: Request) {
         search: query.q,
         status: query.status,
         language: query.language,
-        purokGrupo: query.purokGrupo,
+        isPriority: query.isPriority,
         worshipDay: query.worshipDay,
         sort: query.sort,
         order: query.order,

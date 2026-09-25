@@ -5,9 +5,10 @@ import { dako } from "./dako";
 /**
  * Destination history (Master Plan §8/§9) — the single normalized
  * teacher<->dako destination relationship. One ACTIVE record per teacher and
- * per dako (partial unique indexes in migration 0005); periods never overlap;
- * records are created ONLY by real Current-Destination edits (no invented
- * backfill). Weekly Suguan assignments NEVER create or modify rows here.
+ * per (dako, duty) slot (partial unique indexes in migration 0005, widened for
+ * duty by 0013); periods never overlap; records are created ONLY by real
+ * Current-Destination edits (no invented backfill). Weekly Suguan assignments
+ * NEVER create or modify rows here.
  */
 export const destinationHistory = pgTable(
   "destination_history",
@@ -19,6 +20,11 @@ export const destinationHistory = pgTable(
     dakoId: uuid("dako_id")
       .notNull()
       .references(() => dako.id, { onDelete: "restrict" }),
+    // Duty held at THIS dako for THIS period — 'DESTINADO' | 'KATUWANG', NULL
+    // when none was recorded (legacy rows; never inferred). teachers.duty
+    // mirrors the duty of the open period so the duty-based generation modes
+    // keep reading the same column they always have.
+    duty: text("duty"),
     startDate: date("start_date").notNull(),
     endDate: date("end_date"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

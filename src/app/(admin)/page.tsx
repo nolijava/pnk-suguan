@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, eq } from "drizzle-orm";
-import { requirePermission } from "@/server/auth/guard";
-import { AssignmentService } from "@/server/services";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
+import { AssignmentService, AvailabilityService } from "@/server/services";
 import { listActiveScheduleCorrections } from "@/server/services/correction.service";
 import { getDb } from "@/server/db/client";
 import { weeks } from "@/server/db/schema";
@@ -48,6 +48,11 @@ export default async function DashboardPage({
   // Phase 6 §6/§7/§13/§14 — persisted absence/modification provenance for cell
   // tooltips (batched; viewing stays read-only).
   const cellInfo = await AssignmentService.getAnnualCellInfo(year);
+  // Update #23 — per-week Weekly Availability readiness for the selected year,
+  // shown on each week column so an operator sees which weeks are ready and
+  // which generation would be blocked BEFORE pressing Confirm (one batched pass,
+  // read-only — it never creates a week row).
+  const availabilityByWeek = await AvailabilityService.getAnnualAvailabilityReadiness(year);
 
   // Current-week summary — real counts from persisted data; read-only view
   // never creates the week row (§20).
@@ -161,6 +166,7 @@ export default async function DashboardPage({
           currentWeekKey={currentWeekKey}
           currentIsoLabel={`W${cur.week} · ${cur.year}`}
           cellInfo={cellInfo}
+          availabilityByWeek={availabilityByWeek}
           writable={writable}
           currentUserId={user.userId}
           correctionsByWeek={Object.fromEntries(

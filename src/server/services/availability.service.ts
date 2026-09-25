@@ -6,16 +6,25 @@ import {
   teachers,
   dako,
   auditLogs,
+  assignments,
+  magtuturoAssignments,
 } from "@/server/db/schema";
 import {
   availabilityUpsertSchema,
   availabilityBulkSchema,
   type AvailabilityUpsertInput,
 } from "@/lib/validation/schemas";
-import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from "@/lib/errors";
+import {
+  NotFoundError,
+  ValidationError,
+  ConflictError,
+  ForbiddenError,
+  AvailabilityRequiredError,
+} from "@/lib/errors";
 import { audit } from "./audit.service";
 import type { SessionUser } from "@/server/auth/session";
-import { isoWeek, isoWeekStart } from "@/lib/iso-week";
+import { isoWeek, isoWeekStart, isoWeeksInYear } from "@/lib/iso-week";
+import * as WeekService from "./week.service";
 
 /**
  * Effective-status precedence (Phase 3 §8) — the single authoritative resolver:
@@ -346,9 +355,58 @@ export interface WeeklyAvailabilityRow {
   reason: string | null;
   remarks: string | null;
   effectiveStatus: EffectiveAvailabilityStatus;
+  /** Update #14 — real assignment label(s) for the selected week (never inferred). */
+  assignedAs: string;
 }
 
 export type AvailabilityFilter = "AVAILABLE" | "ABSENT" | "INACTIVE_WEEKLY" | "INACTIVE_MASTER" | "NOT_ENCODED";
+
+// ---------------------------------------------------------------------------
+// Update #14 — assigned-role labels read from actual assignment data for the
+// selected week (regular Suguan + Magtuturo sa Klase). Never inferred from
+// availability.
+// ---------------------------------------------------------------------------
+
+export const NOT_ASSIGNED_LABEL = "Not Assigned";
+
+const ASSIGNED_TYPE_LABEL: Record<string, string> = {
+  SUGO: "Assigned — SUGO",
+  RESERBA: "Assigned — RESERBA",
+  RESERBA_II: "Assigned — RESERBA II",
+};
+const MAGTUTURO_TYPE_LABEL: Record<string, string> = {
+  SUGO: "Assigned — MAGTUTURO SUGO",
+  RESERBA: "Assigned — MAGTUTURO RESERBA",
+};
+
+async function assignedLabelsByTeacher(
+  weekId: string,
+  teacherIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (teacherIds.length === 0) return map;
+  const [regular, magtuturo] = await Promise.all([
+    getDb()
+      .select({ teacherId: assignments.teacherId, assignmentType: assignments.assignmentType })
+      .from(assignments)
+      .where(and(eq(assignments.weekId, weekId), inArray(assignments.teacherId, teacherIds))),
+    getDb()
+      .select({ teacherId: magtuturoAssignments.teacherId, magType: magtuturoAssignments.magType })
+      .from(magtuturoAssignments)
+      .where(and(eq(magtuturoAssignments.weekId, weekId), inArray(magtuturoAssignments.teacherId, teacherIds))),
+  ]);
+  const parts = new Map<string, string[]>();
+  const push = (teacherId: string, label: string) =>
+    parts.set(teacherId, [...(parts.get(teacherId) ?? []), label]);
+  for (const r of regular) {
+    push(r.teacherId, ASSIGNED_TYPE_LABEL[r.assignmentType] ?? `Assigned — ${r.assignmentType}`);
+  }
+  for (const r of magtuturo) {
+    push(r.teacherId, MAGTUTURO_TYPE_LABEL[r.magType] ?? `Assigned — MAGTUTURO ${r.magType}`);
+  }
+  for (const [id, list] of parts) map.set(id, list.join(" · "));
+  return map;
+}
 
 export async function listWeeklyAvailability(
   weekId: string,
@@ -394,7 +452,7 @@ export async function listWeeklyAvailability(
   }
   const whereClause = conds.length > 0 ? and(...conds) : undefined;
 
-  const fullName = sql<string>`concat_ws(' ', ${teachers.firstName}, ${teachers.middleName}, ${teachers.lastName})`;
+  const fullName = sql<string>`concat_ws(' ', ${teachers.firstName}, ${teachers.middleName}, ${teachers.lastName}) || coalesce(', ' || nullif(trim(${teachers.suffix}), ''), '')`;
   const orderCol = opts.sort === "name" ? fullName : teachers.teacherCode;
   const orderDir = opts.order === "desc" ? desc : asc;
 
@@ -439,8 +497,15 @@ export async function listWeeklyAvailability(
     )
     .where(whereClause);
 
+  // Update #14 — assigned-role labels straight from assignment data.
+  const assignedByTeacher = await assignedLabelsByTeacher(weekId, rows.map((r) => r.teacherId));
+
   return {
-    rows: rows.map((r) => ({ ...r, effectiveStatus: resolveEffectiveStatus(r.weeklyStatus, r.masterStatus) })),
+    rows: rows.map((r) => ({
+      ...r,
+      effectiveStatus: resolveEffectiveStatus(r.weeklyStatus, r.masterStatus),
+      assignedAs: assignedByTeacher.get(r.teacherId) ?? NOT_ASSIGNED_LABEL,
+    })),
     total: countRows[0]?.n ?? 0,
   };
 }
@@ -455,7 +520,7 @@ export async function getTeacherAvailability(
       availabilityId: teacherAvailability.id,
       teacherId: teachers.id,
       teacherCode: teachers.teacherCode,
-      fullName: sql<string>`concat_ws(' ', ${teachers.firstName}, ${teachers.middleName}, ${teachers.lastName})`,
+      fullName: sql<string>`concat_ws(' ', ${teachers.firstName}, ${teachers.middleName}, ${teachers.lastName}) || coalesce(', ' || nullif(trim(${teachers.suffix}), ''), '')`,
       purokGrupo: teachers.purokGrupo,
       language: teachers.language,
       currentDestinationId: teachers.currentDestinationId,
@@ -479,7 +544,12 @@ export async function getTeacherAvailability(
     .limit(1);
   const r = rows[0];
   if (!r) return null;
-  return { ...r, effectiveStatus: resolveEffectiveStatus(r.weeklyStatus, r.masterStatus) };
+  const assignedByTeacher = await assignedLabelsByTeacher(weekId, [r.teacherId]);
+  return {
+    ...r,
+    effectiveStatus: resolveEffectiveStatus(r.weeklyStatus, r.masterStatus),
+    assignedAs: assignedByTeacher.get(r.teacherId) ?? NOT_ASSIGNED_LABEL,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -720,4 +790,237 @@ export async function latestAvailabilityForTeacher(teacherId: string, limit = 10
     .where(eq(teacherAvailability.teacherId, teacherId))
     .orderBy(desc(weeks.startDate))
     .limit(limit);
+}
+
+// ---------------------------------------------------------------------------
+// Update #22 — WEEKLY AVAILABILITY PREREQUISITE for Suguan generation.
+//
+// Generation (Auto-generate / Assign Destinado / Assign Katuwang) and Manual
+// encoding may not proceed until the REQUIRED teacher availability exists for
+// the SELECTED ISO week. "Required" = every master-ACTIVE teacher: exactly the
+// set Fill Blanks targets, and the set whose missing row resolves to
+// NOT_ENCODED. Master-INACTIVE teachers are never required (they never receive
+// a weekly row).
+//
+// This is server-side business-rule enforcement: the generation endpoints call
+// assertGenerationAvailability() BEFORE anything is generated or persisted, so
+// frontend manipulation cannot bypass it. A blocked attempt is audited
+// (GENERATION_BLOCKED) through the existing append-only audit log — no second
+// audit system.
+// ---------------------------------------------------------------------------
+
+export interface WeeklyAvailabilityReadiness {
+  ready: boolean;
+  missing: number;
+  total: number;
+  year: number;
+  week: number;
+  weekId: string | null;
+  /** The exact blocking sentence shown to the operator (null when ready). */
+  message: string | null;
+}
+
+/** The blocking sentence shown to the operator (and used in the audit reason). */
+export function availabilityRequiredMessage(
+  year: number,
+  week: number,
+  missing: number,
+  total: number,
+): string {
+  return (
+    `Weekly Availability has not been set for one or more teachers for ISO Week ${week}, ${year} ` +
+    `(${missing} of ${total} teacher(s) still missing). ` +
+    "Please set the teacher availability before generating the Suguan."
+  );
+}
+
+/** How many required (master-ACTIVE) teachers still lack a row for the week. */
+async function countRequiredAvailability(
+  weekId: string | null,
+): Promise<{ total: number; missing: number }> {
+  if (!weekId) {
+    // No week row exists yet ⇒ no availability can exist for it (FK), so every
+    // required teacher is missing — without creating the week.
+    const rows = await getDb()
+      .select({ id: teachers.id })
+      .from(teachers)
+      .where(eq(teachers.status, "ACTIVE"));
+    return { total: rows.length, missing: rows.length };
+  }
+  const rows = await getDb()
+    .select({ availId: teacherAvailability.id })
+    .from(teachers)
+    .leftJoin(
+      teacherAvailability,
+      and(
+        eq(teacherAvailability.teacherId, teachers.id),
+        eq(teacherAvailability.weekId, weekId),
+      ),
+    )
+    .where(eq(teachers.status, "ACTIVE"));
+  return { total: rows.length, missing: rows.filter((r) => !r.availId).length };
+}
+
+/**
+ * Readiness for one target week — addressed by weekId or by {year, week}.
+ * READ-ONLY: it never creates a week row, so a blocked probe leaves nothing
+ * behind. ISO-year correctness comes from the same ISO math the generator uses
+ * (isoWeeksInYear) plus the weeks row itself (Week 53 only when it exists).
+ */
+export async function getWeeklyAvailabilityReadiness(
+  ref: { weekId?: string; year?: number; week?: number },
+): Promise<WeeklyAvailabilityReadiness> {
+  let weekRow: typeof weeks.$inferSelect | null = null;
+  if (ref.weekId) {
+    const rows = await getDb().select().from(weeks).where(eq(weeks.id, ref.weekId)).limit(1);
+    if (!rows[0]) throw new NotFoundError("week not found");
+    weekRow = rows[0];
+  } else if (typeof ref.year === "number" && typeof ref.week === "number") {
+    if (ref.week < 1 || ref.week > isoWeeksInYear(ref.year)) {
+      throw new ValidationError(
+        `year ${ref.year} has only ${isoWeeksInYear(ref.year)} ISO weeks`,
+      );
+    }
+    weekRow = await WeekService.findWeek(ref.year, ref.week);
+  } else {
+    throw new ValidationError("provide either weekId or {year, week}");
+  }
+
+  const year = weekRow?.year ?? ref.year!;
+  const week = weekRow?.isoWeekNumber ?? ref.week!;
+  const counts = await countRequiredAvailability(weekRow?.id ?? null);
+  const ready = counts.missing === 0;
+  return {
+    ready,
+    missing: counts.missing,
+    total: counts.total,
+    year,
+    week,
+    weekId: weekRow?.id ?? null,
+    message: ready ? null : availabilityRequiredMessage(year, week, counts.missing, counts.total),
+  };
+}
+
+/** Audit ONE blocked generation attempt through the existing audit log. */
+export async function auditBlockedGeneration(
+  week: { id: string | null; year: number; isoWeekNumber: number },
+  actor: SessionUser,
+  mode: string,
+  readiness: WeeklyAvailabilityReadiness,
+): Promise<void> {
+  await audit({
+    user: actor,
+    action: "GENERATION_BLOCKED",
+    entityType: "week",
+    entityId: week.id,
+    oldValue: null,
+    newValue: {
+      week: { id: week.id, year: week.year, isoWeekNumber: week.isoWeekNumber },
+      role: (actor as SessionUser & { roleCodes?: string[] }).roleCodes ?? [],
+      generationMode: mode,
+      validation: {
+        result: "BLOCKED",
+        rule: "WEEKLY_AVAILABILITY_REQUIRED",
+        missing: readiness.missing,
+        total: readiness.total,
+      },
+    },
+    reason: `Weekly Availability not set for ISO Week ${week.isoWeekNumber}, ${week.year}`,
+  });
+}
+
+/**
+ * Per-week readiness for a WHOLE ISO year — the shape the Annual assignment
+ * matrix shows on each week column. Computed in ONE read-only pass (three
+ * batched queries, never per-week) so a 53-week matrix stays a constant cost.
+ *
+ * It deliberately mirrors the gate: the same required set (master-ACTIVE
+ * teachers), the same "no row ⇒ missing" semantics, and the same total — so the
+ * indicator can never disagree with what generation is about to do. A week the
+ * year has not started yet has no row, hence every required teacher is missing.
+ */
+export interface WeekAvailabilityReadiness {
+  week: number;
+  ready: boolean;
+  missing: number;
+  total: number;
+  /** The week row id when the week exists — null means "not started yet". */
+  weekId: string | null;
+}
+
+export async function getAnnualAvailabilityReadiness(
+  year: number,
+): Promise<Record<number, WeekAvailabilityReadiness>> {
+  const db = getDb();
+  const weekCount = isoWeeksInYear(year);
+
+  // Week rows are created on demand, so a year's set is legitimately sparse.
+  const weekRows = await db
+    .select({ id: weeks.id, week: weeks.isoWeekNumber })
+    .from(weeks)
+    .where(eq(weeks.year, year));
+
+  // Required set = every master-ACTIVE teacher (exactly the gate's set).
+  const required = await db
+    .select({ id: teachers.id })
+    .from(teachers)
+    .where(eq(teachers.status, "ACTIVE"));
+  const total = required.length;
+
+  // Encoded coverage per week, ACTIVE teachers only — ONE grouped query
+  // (aggregated in SQL, so a fully encoded year transfers one row per week).
+  const encodedByWeek = new Map<string, number>();
+  if (weekRows.length > 0) {
+    const rows = await db
+      .select({
+        weekId: teacherAvailability.weekId,
+        encoded: sql<number>`count(distinct ${teacherAvailability.teacherId})::int`,
+      })
+      .from(teacherAvailability)
+      .innerJoin(teachers, eq(teachers.id, teacherAvailability.teacherId))
+      .where(
+        and(
+          inArray(
+            teacherAvailability.weekId,
+            weekRows.map((w) => w.id),
+          ),
+          eq(teachers.status, "ACTIVE"),
+        ),
+      )
+      .groupBy(teacherAvailability.weekId);
+    for (const r of rows) encodedByWeek.set(r.weekId, r.encoded);
+  }
+
+  const rowByWeek = new Map(weekRows.map((w) => [w.week, w.id]));
+  const out: Record<number, WeekAvailabilityReadiness> = {};
+  for (let w = 1; w <= weekCount; w++) {
+    const weekId = rowByWeek.get(w) ?? null;
+    const encoded = weekId ? (encodedByWeek.get(weekId) ?? 0) : 0;
+    const missing = Math.max(total - encoded, 0);
+    out[w] = { week: w, ready: missing === 0, missing, total, weekId };
+  }
+  return out;
+}
+
+/**
+ * The authoritative gate: validates the target week's availability and, when it
+ * is incomplete, audits the blocked attempt and throws AvailabilityRequiredError.
+ * Both generation paths and the UI gate probe use exactly this function.
+ */
+export async function assertGenerationAvailability(
+  ref: { weekId?: string; year?: number; week?: number },
+  actor: SessionUser,
+  mode: string,
+): Promise<WeeklyAvailabilityReadiness> {
+  const readiness = await getWeeklyAvailabilityReadiness(ref);
+  if (!readiness.ready) {
+    await auditBlockedGeneration(
+      { id: readiness.weekId, year: readiness.year, isoWeekNumber: readiness.week },
+      actor,
+      mode,
+      readiness,
+    );
+    throw new AvailabilityRequiredError(readiness.message!);
+  }
+  return readiness;
 }

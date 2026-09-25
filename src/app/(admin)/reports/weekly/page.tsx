@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { FilterForm } from "@/app/(admin)/_components";
 import { weeklyReport } from "@/server/services/reports.service";
 import { isoWeek, isoWeeksInYear } from "@/lib/iso-week";
 import { StatusBadge, ReportSourceBadge } from "../_shared";
+import { ReportPdfButton } from "../pdf-button";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,11 @@ export default async function WeeklyReportPage({
         ]}
       />
 
+      {/* New Update #5 — print the selected ISO week. */}
+      <div className="actions-row">
+        <ReportPdfButton report="weekly" params={{ year, week }} label={`Generate PDF (W${String(week).padStart(2, "0")} ${year})`} />
+      </div>
+
       {report.sections.map((sec) => (
         <section key={sec.type} className="sched-section">
           <h2>{sec.label}</h2>
@@ -94,6 +100,8 @@ export default async function WeeklyReportPage({
                             {s.reasonCode}
                             {s.reason ? `: ${s.reason}` : ""}
                           </span>
+                        ) : s.reason ? (
+                          <span className="info-note">{s.reason}</span>
                         ) : (
                           <span className="info-note">—</span>
                         )}

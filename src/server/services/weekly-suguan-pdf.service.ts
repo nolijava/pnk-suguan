@@ -20,6 +20,7 @@ import { isoWeekDates } from "@/lib/iso-week";
 import { NotFoundError } from "@/lib/errors";
 import { isNormalSchedulingWeek } from "@/server/config";
 import { listAssignmentsForWeek } from "./assignment.service";
+import { listMagtuturoForWeek } from "./magtuturo.service";
 import {
   renderSuguanSlipPages,
   type SuguanSlip,
@@ -66,7 +67,8 @@ export interface WeeklySuguanViewModel {
   sectionB: { heading: string; rows: SuguanFormRow[] }; // ALL APPLICABLE dakos (see dakoInclusion)
   /** null ⇔ zero RESERBA_II assignments ⇒ section C omitted entirely. */
   sectionC: { heading: string; rows: SuguanFormRow[] } | null;
-  sectionD: { heading: string; rows: { gampanin: string }[] }; // static 4 SUGO + 2 RESERBA
+  /** Update #21.13 — rows carry the Magtuturo teacher name (PANGALAN col). */
+  sectionD: { heading: string; rows: { gampanin: string; pangalan: string | null }[] }; // 4 SUGO + 2 RESERBA
   signatories: SuguanFormSignatory[];
   footer: string;
   /** DRAFT renders a diagonal watermark; FINALIZED/PUBLISHED render clean. */
@@ -146,6 +148,13 @@ export async function buildWeeklySuguanViewModel(weekId: string): Promise<Weekly
       dakoStatusAt: d.status === "ACTIVE" ? ("ACTIVE" as const) : ("DISABLED" as const),
     }));
 
+  // Update #21.13 — section D PANGALAN comes from the real Magtuturo records
+  // (4 SUGO seats then 2 RESERBA seats, same order as gampanin). One extra
+  // set-based read of the SAME authoritative source the Magtuturo page shows.
+  const magtuturo = await listMagtuturoForWeek(weekId);
+  const magSugo = magtuturo.filter((m) => m.magType === "SUGO").sort((x, y) => x.seat - y.seat);
+  const magReserba = magtuturo.filter((m) => m.magType === "RESERBA").sort((x, y) => x.seat - y.seat);
+
   const sugo = mkRows("SUGO");
   const reserba = mkRows("RESERBA");
   const reserbaIiRows = mkRows("RESERBA_II").filter((r) => r.pangalan !== null);
@@ -165,8 +174,12 @@ export async function buildWeeklySuguanViewModel(weekId: string): Promise<Weekly
     sectionD: {
       heading: "D. MGA MAGTUTURO SA KLASE",
       rows: [
-        { gampanin: "SUGO" }, { gampanin: "SUGO" }, { gampanin: "SUGO" }, { gampanin: "SUGO" },
-        { gampanin: "RESERBA" }, { gampanin: "RESERBA" },
+        { gampanin: "SUGO", pangalan: magSugo[0]?.teacherName ?? null },
+        { gampanin: "SUGO", pangalan: magSugo[1]?.teacherName ?? null },
+        { gampanin: "SUGO", pangalan: magSugo[2]?.teacherName ?? null },
+        { gampanin: "SUGO", pangalan: magSugo[3]?.teacherName ?? null },
+        { gampanin: "RESERBA", pangalan: magReserba[0]?.teacherName ?? null },
+        { gampanin: "RESERBA", pangalan: magReserba[1]?.teacherName ?? null },
       ],
     },
     signatories: [
@@ -493,10 +506,10 @@ export function buildPrintedForm(vm: WeeklySuguanViewModel): PrintedForm {
   ];
 
   const dRows: PrintedRow[] = [
-    ...vm.sectionD.rows.slice(0, dSugoRows).map((r) => row([r.gampanin, "", "", ""])),
+    ...vm.sectionD.rows.slice(0, dSugoRows).map((r) => row([r.gampanin, r.pangalan ?? "", "", ""])),
     // the reference prints a blank row between the SUGO and RESERBA blocks
     row(["", "", "", ""]),
-    ...vm.sectionD.rows.slice(dSugoRows).map((r) => row([r.gampanin, "", "", ""])),
+    ...vm.sectionD.rows.slice(dSugoRows).map((r) => row([r.gampanin, r.pangalan ?? "", "", ""])),
   ];
 
   const [w0, w1, w2, w3, w4, w5, w6, w7] = PDF_LAYOUT.metaCellWidths;

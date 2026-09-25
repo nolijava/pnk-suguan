@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { FilterForm } from "@/app/(admin)/_components";
 import { annualTypeReport, type ReportTypeCode } from "@/server/services/reports.service";
 import { isoWeek } from "@/lib/iso-week";
 import { StatusBadge, ReportSourceBadge, fmtUtc } from "../_shared";
+import { ReportPdfButton } from "../pdf-button";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,11 @@ export default async function AnnualReportPage({
           },
         ]}
       />
+
+      {/* New Update #5 — print the SAME selection the page is showing. */}
+      <div className="actions-row">
+        <ReportPdfButton report="annual" params={{ year: report.year, type }} label={`Generate PDF (Annual ${label})`} />
+      </div>
 
       <div className="table-wrap">
         <table>

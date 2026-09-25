@@ -22,6 +22,17 @@ export function getDb(): Database {
   return drizzle(getDbClient(), { schema });
 }
 
+/**
+ * Drop the cached connection pool. Restore flow only: the database was
+ * replaced underneath the app, so every pooled connection is stale — the next
+ * getDb() call opens a fresh pool against the restored database.
+ */
+export async function closeDbClient(): Promise<void> {
+  const c = client;
+  client = undefined;
+  if (c) await c.end({ timeout: 5 });
+}
+
 /** Run a unit of work; rolls back on throw. */
 export async function withTransaction<T>(fn: (tx: Database) => Promise<T>): Promise<T> {
   return (await getDb().transaction(async (tx) => fn(tx as unknown as Database))) as T;

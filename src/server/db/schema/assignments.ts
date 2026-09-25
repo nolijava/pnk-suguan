@@ -19,6 +19,10 @@ export const assignments = pgTable(
       .references(() => teachers.id, { onDelete: "restrict" }),
     assignmentType: text("assignment_type").notNull(),
     assignmentSource: text("assignment_source").notNull().default("MANUAL"),
+    // Duty-based generation modes only: 'ASSIGN_DESTINADO' | 'ASSIGN_KATUWANG'
+    // (NULL for Auto-generate / manual / override rows). Backs the per-dako
+    // fair-rotation counts and keeps rotation decisions reconstructable.
+    generationMode: text("generation_mode"),
     status: text("status").notNull().default("ASSIGNED"),
     isOverride: boolean("is_override").notNull().default(false),
     overrideReason: text("override_reason"),

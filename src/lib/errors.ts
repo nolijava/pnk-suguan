@@ -13,6 +13,16 @@ export class ValidationError extends AppError {
   constructor(message: string) { super(message, 422, "VALIDATION_ERROR"); }
 }
 /**
+ * Update #22 — the Weekly Availability prerequisite for Suguan generation.
+ * A well-formed generation request that violates the business rule (weekly
+ * availability not encoded for the selected ISO week) answers 422 with a CODE
+ * the UI keys on to render the "Weekly Availability Required" notice (with the
+ * Go to Weekly Availability action) instead of a generic error message.
+ */
+export class AvailabilityRequiredError extends AppError {
+  constructor(message: string) { super(message, 422, "AVAILABILITY_REQUIRED"); }
+}
+/**
  * Caller error for a missing or malformed request parameter (query or path).
  *
  * Distinct from ValidationError (422), which is used for a well-formed request

@@ -1,0 +1,7 @@
+# Shipped logo artwork must round-trip byte-exact.
+#
+# core.autocrlf is on for this repo, which would rewrite the SVG's line endings
+# on checkout; `npm run logo -- --check` compares rendered bytes, so a converted
+# SVG would look "drifted" even though the artwork is correct. The raster twins
+# are binary. Never apply EOL conversion to anything under public/logo/.
+public/logo/* -text

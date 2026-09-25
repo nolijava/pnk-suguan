@@ -18,7 +18,42 @@ export async function register() {
   // timer safely, the failure must be reported — not silently substituted.
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  const g = globalThis as typeof globalThis & { __pnkAnniversaryTimer?: NodeJS.Timeout };
+  const g = globalThis as typeof globalThis & {
+    __pnkAnniversaryTimer?: NodeJS.Timeout;
+    __pnkDbCheckStarted?: boolean;
+    __pnkEmailCheckStarted?: boolean;
+  };
+
+  // Post-release hardening — advisory startup database check (see
+  // server/db/startup-check.ts): prints which database the app ACTUALLY uses
+  // and warns when the config file disagrees (the stale-.env class of drift).
+  // Fire-and-forget: it must never block or break startup, and it never logs
+  // passwords. Once per process (HMR-safe), like the timer below.
+  if (!g.__pnkDbCheckStarted) {
+    g.__pnkDbCheckStarted = true;
+    void import("@/server/db/startup-check")
+      .then((m) => m.runDatabaseStartupCheck())
+      .catch((err) => console.warn("[db-check] check skipped:", err instanceof Error ? err.message : err));
+  }
+
+  // New Update #2 — ONE secret-free startup line when password-reset email
+  // cannot be delivered at all. A forgotten SMTP configuration previously
+  // produced only a silently discarded code (with the response deliberately
+  // unchanged, to avoid an account-existence oracle); this line makes the
+  // configuration gap visible in the log without ever revealing a value.
+  if (!g.__pnkEmailCheckStarted) {
+    g.__pnkEmailCheckStarted = true;
+    void import("@/server/auth/email")
+      .then((m) => {
+        if (!m.isEmailConfigured()) {
+          console.warn(
+            `[email] password-reset email is NOT configured — ${m.emailConfigurationProblem() ?? "SMTP unavailable"}`,
+          );
+        }
+      })
+      .catch(() => console.warn("[email] configuration check skipped"));
+  }
+
   if (g.__pnkAnniversaryTimer) return; // module-level guard: never double-start
 
   const INTERVAL_MS = 6 * 60 * 60 * 1000; // approximately every 6 hours

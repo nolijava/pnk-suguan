@@ -110,6 +110,56 @@ function body(payload: PasswordResetEmail): string {
  * Deliver the verification code. Resolves `delivered: false` (never throws) when
  * email is unavailable, so the HTTP response cannot depend on SMTP health.
  */
+export interface TestEmailResult {
+  delivered: boolean;
+  /** Secret-free explanation when delivery did not happen (null on success). */
+  problem: string | null;
+}
+
+/**
+ * New Update #2 — operator-facing delivery test.
+ *
+ * Sends a plain message to an address the ADMINISTRATOR already owns, over the
+ * SAME transport and configuration as the recovery email. It contains no code,
+ * no link and no secret, never reveals the SMTP URL, and reports the TRUE
+ * outcome (a successful handshake is real evidence; a failed one names the
+ * configuration problem). Used by the Settings email card so "no OTP arrived"
+ * can be told apart from "email was never configured".
+ */
+export async function sendTestEmail(to: string): Promise<TestEmailResult> {
+  const transport = await getTransport();
+  if (!transport) {
+    return { delivered: false, problem: emailConfigurationProblem() ?? "SMTP transport unavailable" };
+  }
+  try {
+    await transport.sendMail({
+      from: fromAddress(),
+      to,
+      subject: "PNK Suguan - email delivery test",
+      text: [
+        "This is a delivery test from the PNK Suguan System.",
+        "",
+        "If you received it, password-reset verification codes can be delivered from this machine.",
+        "No action is required; this message contains no code and no credentials.",
+        "",
+        "- PNK Suguan System",
+      ].join("\n"),
+    });
+    return { delivered: true, problem: null };
+  } catch {
+    // SMTP error detail can contain credentials/hostnames — never surfaced raw.
+    console.error("[email-test] delivery failed");
+    return {
+      delivered: false,
+      problem: "SMTP refused the message — check the host, port, TLS mode and credentials",
+    };
+  }
+}
+
+/**
+ * Deliver the verification code. Resolves `delivered: false` (never throws) when
+ * email is unavailable, so the HTTP response cannot depend on SMTP health.
+ */
 export async function sendPasswordResetCode(payload: PasswordResetEmail): Promise<{ delivered: boolean }> {
   if (passwordResetDevEchoEnabled()) {
     // Explicit developer opt-in only; unreachable when NODE_ENV === "production".

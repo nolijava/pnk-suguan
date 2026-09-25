@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { THEME_COOKIE, THEME_STORAGE_KEY, type Theme } from "@/lib/theme";
+import { BrandMark } from "@/app/_components/brand-mark";
 
 /**
  * Application shell (visual layer only). Renders the sidebar navigation exactly
@@ -43,6 +44,12 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="m9 15 2 2 4-4" />
     </svg>
   ),
+  magtuturo: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 5.5h6a2.5 2.5 0 0 1 2 1 2.5 2.5 0 0 1 2-1h6v13h-6a2.5 2.5 0 0 0-2 1 2.5 2.5 0 0 0-2-1H4z" />
+      <path d="M12 6.5v12" />
+    </svg>
+  ),
   schedule: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="3.5" y="4.5" width="17" height="16" rx="2.2" />
@@ -77,9 +84,20 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="M16 15.2c2.7.3 4.5 2.1 4.5 4.8" />
     </svg>
   ),
+  settings: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.88 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.88.34H9.1a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.88v.08a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z" />
+    </svg>
+  ),
   collapse: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M14.5 6.5 9 12l5.5 5.5" />
+    </svg>
+  ),
+  chevron: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m7 10 5 5 5-5" />
     </svg>
   ),
   menu: (
@@ -105,16 +123,26 @@ const PAGE_TITLES: Array<[string, string, string]> = [
   ["/dako", "Dako", "Congregation records and teacher destination history"],
   ["/availability", "Availability", "Weekly availability encoding"],
   ["/schedule", "Weekly Schedule", "SUGO · RESERBA · RESERBA II"],
+  ["/magtuturo", "Mga Magtuturo sa Klase", "SUGO · RESERBA — classroom teaching assignments"],
   ["/historical", "Historical Backfill", "Pre-go-live assignment encoding"],
   ["/reports", "Reports", "Read-only operational reports"],
   ["/audit-logs", "Audit Log", "Administrative action history"],
   ["/users", "User Management", "Accounts, roles, and access"],
+  ["/settings", "Settings", "Backup and restore of this machine's database"],
 ];
 
 export interface ShellNavItem {
   href: string;
   label: string;
   icon: keyof typeof ICONS;
+  /**
+   * New Update #11 — optional sub-items. A group is a pure DISCLOSURE: its
+   * header is a real button (tap/click/keyboard, never hover-only) and the
+   * children are ordinary links, each still carrying its own `aria-current`.
+   * Grouping changes where a page is REACHED, never whether it is authorized —
+   * every page keeps its own server-side guard.
+   */
+  children?: ShellNavItem[];
 }
 
 export function AppShell({
@@ -139,6 +167,43 @@ export function AppShell({
   const [scrolled, setScrolled] = useState(false);
   const tipRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
+
+  /** New Update #11 — which nav groups are open (by group href). */
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  const isActive = useCallback(
+    (href: string) => pathname === href || (href !== "/" && pathname.startsWith(`${href}/`)),
+    [pathname],
+  );
+
+  /** A group is open when it was opened by hand, or when it holds the active page. */
+  const groupOpen = useCallback(
+    (item: ShellNavItem) => {
+      const manual = openGroups[item.href];
+      if (manual !== undefined) return manual;
+      return (item.children ?? []).some((child) => isActive(child.href));
+    },
+    [openGroups, isActive],
+  );
+
+  const toggleGroup = useCallback(
+    (item: ShellNavItem) => {
+      // In the collapsed rail the labels are hidden, so a group header first
+      // expands the rail — then it behaves like any other disclosure.
+      if (collapsed) {
+        try {
+          window.localStorage.setItem("pnk-shell-collapsed", "false");
+        } catch {
+          /* storage unavailable — the rail still expands for this session */
+        }
+        setCollapsed(false);
+        setOpenGroups((prev) => ({ ...prev, [item.href]: true }));
+        return;
+      }
+      setOpenGroups((prev) => ({ ...prev, [item.href]: !groupOpen(item) }));
+    },
+    [collapsed, groupOpen],
+  );
 
   useEffect(() => {
     const stored = typeof window !== "undefined" ? window.localStorage.getItem("pnk-shell-collapsed") : null;
@@ -313,9 +378,7 @@ export function AppShell({
     <div className="shell" data-collapsed={collapsed ? "true" : "false"}>
       <aside className="sidebar" data-open={drawerOpen ? "true" : "false"} aria-label="Primary">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            PNK
-          </span>
+          <BrandMark />
           <span className="brand-text">
             <strong>PNK Suguan</strong>
             <span>Assignment Management</span>
@@ -332,18 +395,61 @@ export function AppShell({
           onBlurCapture={hideRailTip}
         >
           {navItems.map((item) => {
-            const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(`${item.href}/`));
+            const active = isActive(item.href);
+            const children = item.children ?? [];
+
+            if (children.length === 0) {
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="nav-item"
+                  data-label={item.label}
+                  aria-current={active ? "page" : undefined}
+                >
+                  {ICONS[item.icon]}
+                  <span className="nav-label">{item.label}</span>
+                </Link>
+              );
+            }
+
+            const open = groupOpen(item);
+            const holdsActive = children.some((child) => isActive(child.href));
+            const subId = `nav-sub-${item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="nav-item"
-                data-label={item.label}
-                aria-current={active ? "page" : undefined}
-              >
-                {ICONS[item.icon]}
-                <span className="nav-label">{item.label}</span>
-              </Link>
+              <div className="nav-group" key={item.href}>
+                <button
+                  type="button"
+                  className="nav-item nav-group-toggle"
+                  data-label={item.label}
+                  data-active={holdsActive ? "true" : "false"}
+                  aria-expanded={open}
+                  aria-controls={subId}
+                  onClick={() => toggleGroup(item)}
+                >
+                  {ICONS[item.icon]}
+                  <span className="nav-label">{item.label}</span>
+                  <span className="nav-chevron" aria-hidden="true" data-open={open ? "true" : "false"}>
+                    {ICONS.chevron}
+                  </span>
+                </button>
+                {open ? (
+                  <div className="nav-sub" id={subId}>
+                    {children.map((child) => (
+                      <Link
+                        key={child.href}
+                        href={child.href}
+                        className="nav-item nav-subitem"
+                        data-label={child.label}
+                        aria-current={isActive(child.href) ? "page" : undefined}
+                      >
+                        {ICONS[child.icon]}
+                        <span className="nav-label">{child.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             );
           })}
         </nav>

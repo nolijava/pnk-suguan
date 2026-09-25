@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { FilterForm } from "@/app/(admin)/_components";
 import { teacherAssignmentReport, REPORT_SOURCE_CODES, REPORT_TYPE_CODES } from "@/server/services/reports.service";
 import { TeacherService } from "@/server/services";
 import { isoWeek } from "@/lib/iso-week";
+import { formatFullName } from "@/lib/name";
 import { StatusBadge, ReportSourceBadge, fmtUtc } from "../_shared";
+import { ReportPdfButton } from "../pdf-button";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +61,7 @@ export default async function TeacherReportPage({
             label: "Teacher",
             options: allTeachers.map((t) => ({
               value: t.id,
-              label: [t.firstName, t.middleName, t.lastName].filter(Boolean).join(" "),
+              label: formatFullName(t),
             })),
           },
           {
@@ -84,6 +86,15 @@ export default async function TeacherReportPage({
       />
 
       {invalidYear ? <p className="error">Invalid year — must be an integer between 1900 and 2999.</p> : null}
+
+      {/* New Update #5 — print the same teacher + filters shown here. */}
+      <div className="actions-row">
+        <ReportPdfButton
+          report="teacher"
+          params={{ teacherId, year, source, type }}
+          label="Generate PDF (teacher history)"
+        />
+      </div>
 
       {report ? (
         <div className="table-wrap">

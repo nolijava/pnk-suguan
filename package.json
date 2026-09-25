@@ -1,6 +1,6 @@
 {
   "name": "pnk-suguan-system",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "PNK Teacher Assignment & Suguan Management System — Phase 1 foundation",
   "engines": {

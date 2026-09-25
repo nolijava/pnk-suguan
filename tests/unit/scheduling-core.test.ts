@@ -16,6 +16,7 @@ function teacher(over: Partial<CandidateTeacher> = {}): CandidateTeacher {
     language: "FILIPINO",
     status: "ACTIVE",
     currentDestinationId: null,
+    dateOfOath: null,
     ...over,
   };
 }
@@ -27,6 +28,7 @@ function dako(over: Partial<ScheduleDako> = {}): ScheduleDako {
     dakoName: "Dako One",
     language: "FILIPINO",
     status: "ACTIVE",
+    isPriority: false,
     ...over,
   };
 }
@@ -37,6 +39,7 @@ function ctx(over: Partial<SchedulingContext> = {}): SchedulingContext {
     year: 2026,
     isoWeekNumber: 40,
     weekStatus: "DRAFT",
+    weekServiceDate: "2026-10-04",
     teachers: [teacher()],
     dakos: [dako()],
     availability: new Map([["t1", { status: "AVAILABLE", reason: null }]]),
@@ -135,6 +138,7 @@ function bigCtx(teachers: CandidateTeacher[], dakos: ScheduleDako[], counts: [st
     year: 2026,
     isoWeekNumber: 40,
     weekStatus: "DRAFT",
+    weekServiceDate: "2026-10-04",
     teachers,
     dakos,
     availability: new Map(teachers.map((t) => [t.teacherId, { status: "AVAILABLE", reason: null }])),

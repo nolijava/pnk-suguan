@@ -33,9 +33,9 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("PNK Suguan System Setup")]
 [assembly: AssemblyProduct("PNK Suguan")]
 [assembly: AssemblyCompany("RetsLi")]
-[assembly: AssemblyVersion("2.0.0.0")]
-[assembly: AssemblyFileVersion("2.0.0.0")]
-[assembly: AssemblyInformationalVersion("2.0.0")]
+[assembly: AssemblyVersion("2.1.0.0")]
+[assembly: AssemblyFileVersion("2.1.0.0")]
+[assembly: AssemblyInformationalVersion("2.1.0")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.0")]
 
 namespace PnkSuguanSetup
@@ -43,7 +43,7 @@ namespace PnkSuguanSetup
     internal static class Program
     {
         private const string APP_NAME = "PNK Suguan";
-        private const string APP_VERSION = "2.0.0";
+        private const string APP_VERSION = "2.1.0";
         private const string UNINSTALL_SUBKEY = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\PNK Suguan";
         private const string PAYLOAD_RESOURCE = "payload.zip";
         private const string PAYLOAD_SIBLING = "payload.zip";

@@ -13,7 +13,8 @@ import { getDb } from "@/server/db/client";
 import { assignments, dako, teachers, weeks } from "@/server/db/schema";
 import { isoWeeksInYear } from "@/lib/iso-week";
 
-const teacherName = sql<string>`trim(concat(${teachers.firstName}, ' ', coalesce(${teachers.middleName}, ''), ' ', ${teachers.lastName}))`;
+// Update #3 — complete Guro name incl. comma-separated suffix (presentation only).
+const teacherName = sql<string>`concat_ws(' ', ${teachers.firstName}, ${teachers.middleName}, ${teachers.lastName}) || coalesce(', ' || nullif(trim(${teachers.suffix}), ''), '')`;
 
 export const REPORT_SOURCE_CODES = ["AUTO", "MANUAL", "OVERRIDE", "HISTORICAL"] as const;
 export const REPORT_TYPE_CODES = ["SUGO", "RESERBA", "RESERBA_II"] as const;
@@ -163,12 +164,19 @@ export async function weeklyReport(year: number, weekNumber: number): Promise<We
       dakoName: s.dakoName,
       assignmentType: s.assignmentType,
       assignmentId: hit?.assignmentId ?? null,
-      teacherName: hit ? hit.teacherName : (s.fullName ?? null),
-      teacherCode: hit ? hit.teacherCode : (s.teacherCode ?? null),
+      // Never present a plan suggestion as an assignment: without a DB row the
+      // teacher columns are null and the proposal lands in the reason column.
+      teacherName: hit ? hit.teacherName : null,
+      teacherCode: hit ? hit.teacherCode : null,
       source: hit ? hit.assignmentSource : null,
       status: hit ? hit.status : null,
       reasonCode: hit ? null : (s.reasonCode ?? null),
-      reason: hit ? null : (s.reason ?? null),
+      reason: hit
+        ? null
+        : s.reason ??
+          (s.fullName
+            ? `PLANNED — engine suggests ${s.fullName}${s.teacherCode ? ` (${s.teacherCode})` : ""} on regeneration; not assigned yet`
+            : null),
     });
   }
   // MANUAL/OVERRIDE/HISTORICAL rows whose slot the plan omits (preserved rows).

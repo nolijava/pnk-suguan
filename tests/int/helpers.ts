@@ -16,14 +16,17 @@ export const db = drizzle(sql, { schema });
 
 let adminId: string | undefined;
 let superAdminId: string | undefined;
+let viewerId: string | undefined;
 
 /** Per-test-file: truncate operational tables, create a fresh ADMIN user. */
 export async function resetTestDb(): Promise<void> {
   await sql`TRUNCATE TABLE assignment_history, assignments, teacher_availability, notifications,
-    dako_anniversary_notifications, audit_logs, sessions, password_reset_challenges,
+    dako_anniversary_notifications, teacher_anniversary_notifications, teacher_birthday_notifications,
+    audit_logs, sessions, password_reset_challenges,
     user_roles, teachers, dako, weeks, users RESTART IDENTITY CASCADE`;
   adminId = undefined;
   superAdminId = undefined;
+  viewerId = undefined;
 }
 
 export async function seedAdmin(): Promise<string> {
@@ -68,6 +71,25 @@ export async function seedScheduler(): Promise<string> {
   const user = inserted[0]!;
   const roleRows = await db.select().from(schema.roles).where(eq(schema.roles.code, "SCHEDULER"));
   await db.insert(schema.userRoles).values({ userId: user.id, roleId: roleRows[0]!.id });
+  return user.id;
+}
+
+/**
+ * A REAL read-only VIEWER login. Used by the e2e suite to prove that
+ * permission-gated navigation entries (Users, Backup/Restore, Audit) are not
+ * merely disabled but ABSENT for a role that does not hold the permission.
+ */
+export async function seedViewer(): Promise<string> {
+  if (viewerId) return viewerId;
+  const passwordHash = await hashPassword("TestViewerPass1!");
+  const inserted = await db
+    .insert(schema.users)
+    .values({ email: "viewer@test.local", fullName: "Test Viewer", passwordHash })
+    .returning();
+  const user = inserted[0]!;
+  const roleRows = await db.select().from(schema.roles).where(eq(schema.roles.code, "VIEWER"));
+  await db.insert(schema.userRoles).values({ userId: user.id, roleId: roleRows[0]!.id });
+  viewerId = user.id;
   return user.id;
 }
 

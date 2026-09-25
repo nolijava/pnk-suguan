@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { DakoService } from "@/server/services";
-import { FormField, SelectField, TextAreaField, Notice } from "@/app/(admin)/_components";
+import { FormField, SelectField, TextAreaField, Notice, ConfirmSubmit, UnsavedBack } from "@/app/(admin)/_components";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,8 @@ export default async function NewDakoPage({
   await requirePermission("dako.write");
   const sp = await searchParams;
   const error = typeof sp.error === "string" ? sp.error : undefined;
+  // Update #11 — "+ Add Another Dako": saved flag lands on a fresh form.
+  const added = sp.added === "1";
 
   async function action(formData: FormData) {
     "use server";
@@ -32,7 +34,7 @@ export default async function NewDakoPage({
           name: get("name"),
           address: get("address"),
           dateEstablished: get("dateEstablished"),
-          purokGrupo: get("purokGrupo") || undefined,
+          isPriority: formData.get("isPriority") === "on",
           worshipDay: get("worshipDay") as "SUNDAY",
           worshipTime: get("worshipTime"),
           language: get("language") as "FILIPINO" | "ENGLISH",
@@ -40,6 +42,10 @@ export default async function NewDakoPage({
         },
         actor,
       );
+      // Update #11 — save first, then stay in the create workflow (fresh form).
+      if (formData.get("next") === "another") {
+        redirect("/dako/new?added=1");
+      }
       redirect(`/dako?notice=${encodeURIComponent("Dako created.")}`);
     } catch (e) {
       if (e instanceof Error && e.message === "NEXT_REDIRECT") throw e; // let success redirects propagate
@@ -54,6 +60,8 @@ export default async function NewDakoPage({
         <Link className="btn btn-secondary" href="/dako">Back to list</Link>
       </div>
       {error ? <Notice kind="error">{error}</Notice> : null}
+      {added ? <Notice kind="success">Dako created — add another below.</Notice> : null}
+      <UnsavedBack href="/dako" />
       <form action={action} className="card form-col">
         <div className="form-grid">
           {/* Phase 6 §23 — Dako Code is auto-generated (ILGD-###, concurrency-safe); not user-editable. */}
@@ -61,7 +69,7 @@ export default async function NewDakoPage({
           <FormField label="Dako Name" name="name" required />
           <FormField label="Address" name="address" required />
           <FormField label="Date Established" name="dateEstablished" type="date" required />
-          <FormField label="Purok/Grupo" name="purokGrupo" />
+          <p className="form-span"><label><input type="checkbox" name="isPriority" /> Priority Dako</label> <span className="info-note">Multiple dakos may be Priority — Priority dakos receive RESERBA assignment priority first (Update #6).</span></p>
           <SelectField label="Worship Day" name="worshipDay" required options={DAY_OPTIONS} />
           <FormField label="Worship Time" name="worshipTime" type="time" required placeholder="09:00" />
           <SelectField
@@ -76,8 +84,28 @@ export default async function NewDakoPage({
           Anniversary year count is always computed from Date Established — never stored as editable data.
         </p>
         <div className="actions-row">
-          <button type="submit" className="btn btn-primary">Create Dako</button>
-          <Link className="btn btn-secondary" href="/dako">Cancel</Link>
+          <ConfirmSubmit
+            label="Create Dako"
+            confirmTitle="Create Dako"
+            confirmDescription="Create a new Dako record with the entered data."
+            confirmLabel="Create"
+            summaryFields={[
+              { name: "name", label: "Dako Name" },
+              { name: "address", label: "Address" },
+              { name: "language", label: "Language" },
+            ]}
+          />
+          <ConfirmSubmit
+            label="+ Add Another Dako"
+            confirmTitle="Create Dako and Add Another"
+            confirmDescription="Create this Dako record, then return to a blank form for the next one."
+            confirmLabel="Create and continue"
+            variant="secondary"
+            submitName="next"
+            submitValue="another"
+            summaryFields={[{ name: "name", label: "Dako Name" }]}
+          />
+          <UnsavedBack href="/dako" />
         </div>
       </form>
     </>

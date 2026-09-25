@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { ReportsService } from "@/server/services";
 import { isoWeek } from "@/lib/iso-week";
 import { REPORT_SOURCE_CODES } from "@/server/services/reports.service";
+import { ReportPdfButton } from "./pdf-button";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,17 @@ export default async function ReportsIndexPage() {
             Weekly report (W{String(cur.week).padStart(2, "0")})
           </Link>{" "}
           <Link className="btn btn-secondary" href="/reports/teacher">Teacher assignment history</Link>{" "}
-          <Link className="btn btn-secondary" href="/reports/dako">Dako assignment history</Link>
+          <Link className="btn btn-secondary" href="/reports/dako">Dako assignment history</Link>{" "}
+          <Link
+            className="btn btn-secondary"
+            href={`/reports/celebrations?year=${cur.year}&month=${new Date().getUTCMonth() + 1}`}
+          >
+            Celebrations (birthdays & anniversaries)
+          </Link>{" "}
+          {/* New Update #4 — field-selectable Teacher Masterlist. */}
+          <Link className="btn btn-secondary" href="/reports/teacher-masterlist">
+            Teacher Masterlist
+          </Link>
         </p>
         <p className="info-note">
           Annual and weekly links open the current ISO year/week; use each report&apos;s year/week selectors to change.
@@ -47,7 +58,11 @@ export default async function ReportsIndexPage() {
       </section>
 
       <section>
-        <h2>Assignment source summary — {cur.year}</h2>
+        <div className="section-head">
+          <h2>Assignment source summary — {cur.year}</h2>
+          {/* New Update #5 — every report has a PDF path, this one included. */}
+          <ReportPdfButton report="source-summary" params={{ year: cur.year }} label={`Generate PDF (${cur.year})`} />
+        </div>
         <p className="info-note">
           Counts of assignment rows by source (AUTO / MANUAL / OVERRIDE / HISTORICAL) × Suguan type. Historical
           assignments keep their HISTORICAL source in every report.

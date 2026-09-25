@@ -14,6 +14,7 @@ import {
 } from "@/server/db/schema";
 import { NotFoundError } from "@/lib/errors";
 import { isoWeek } from "@/lib/iso-week";
+import { formatFullName } from "@/lib/name";
 import { wasAbsentPreviousWeekBatch } from "../availability.service";
 import type { SchedulingContext } from "./types";
 
@@ -83,13 +84,18 @@ export async function buildSchedulingContext(
     year: w.year,
     isoWeekNumber: w.isoWeekNumber,
     weekStatus: w.status,
+    // Update #5 — the week SERVICE date (Sunday) is the oath comparison date.
+    weekServiceDate: w.endDate,
     teachers: teacherRows.map((t) => ({
       teacherId: t.id,
       teacherCode: t.teacherCode,
-      fullName: [t.firstName, t.middleName, t.lastName].filter(Boolean).join(" "),
+      // Update #3 — suffix joins the display name as "Juan Dela Cruz, Jr.".
+      fullName: formatFullName({ firstName: t.firstName, middleName: t.middleName, lastName: t.lastName, suffix: t.suffix }),
       language: t.language as "FILIPINO" | "ENGLISH",
       status: t.status,
       currentDestinationId: t.currentDestinationId ?? null,
+      dateOfOath: t.dateOfOath ?? null,
+      duty: (t.duty as "DESTINADO" | "KATUWANG" | null) ?? null,
     })),
     dakos: dakoRows.map((d) => ({
       dakoId: d.id,
@@ -97,6 +103,7 @@ export async function buildSchedulingContext(
       dakoName: d.name,
       language: d.language as "FILIPINO" | "ENGLISH",
       status: d.status,
+      isPriority: d.isPriority,
     })),
     availability: new Map(
       availRows.map((a) => [a.teacherId, { status: a.status, reason: a.reason }]),

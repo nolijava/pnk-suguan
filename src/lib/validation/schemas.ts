@@ -10,6 +10,9 @@ export const weekStatusSchema = z.enum(["DRAFT", "FINALIZED", "PUBLISHED"]);
 export const availabilityStatusSchema = z.enum(["AVAILABLE", "ABSENT", "INACTIVE"]);
 export const assignmentTypeSchema = z.enum(["SUGO", "RESERBA", "RESERBA_II"]);
 export const assignmentSourceSchema = z.enum(["AUTO", "MANUAL", "OVERRIDE"]);
+// Guro Duty — persistent teacher attribute for the duty-based generation
+// modes (Assign Destinado / Assign Katuwang).
+export const dutySchema = z.enum(["DESTINADO", "KATUWANG"]);
 export const userStatusSchema = z.enum(["ACTIVE", "INACTIVE"]);
 
 const teacherBaseSchema = z
@@ -20,10 +23,14 @@ const teacherBaseSchema = z
     firstName: z.string().min(1).max(100),
     middleName: z.string().max(100).optional(),
     lastName: z.string().min(1).max(100),
-    suffix: z.string().max(10).optional(),
+    // Update #3 — optional suffix; nullish so an existing suffix can be CLEARED.
+    suffix: z.string().max(10).nullish(),
     birthday: dateStr.optional(),
     purokGrupo: z.string().max(100).optional(),
     dateOfOath: dateStr.optional(),
+    // Guro Duty: optional at the API (legacy teachers keep no duty), validated
+    // as the enum when present; the Add Teacher form requires a selection.
+    duty: dutySchema.optional(),
     currentDestinationId: z.string().uuid().optional(),
     language: languageSchema,
     remarks: z.string().max(2000).optional(),
@@ -64,7 +71,8 @@ export const dakoCreateSchema = z
     name: z.string().min(1).max(200),
     address: z.string().min(1).max(500),
     dateEstablished: dateStr,
-    purokGrupo: z.string().max(100).optional(),
+    // Update #6 - Priority Dako (multi-select; never a mutually exclusive radio).
+    isPriority: z.boolean().optional(),
     worshipDay: z.enum(["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"]),
     worshipTime: timeHHMM,
     language: languageSchema,
@@ -211,7 +219,37 @@ export const notificationReadSchema = z.object({
   notificationIds: z.array(z.string().uuid()).min(1),
 }).strict();
 
+// ---------------------------------------------------------------------------
+// Update #21 - Mga Magtuturo sa Klase
+// ---------------------------------------------------------------------------
+
+export const magTypeSchema = z.enum(["SUGO", "RESERBA"]);
+
+export const magtuturoAssignSchema = z
+  .object({
+    weekId: z.string().uuid(),
+    teacherId: z.string().uuid(),
+    magType: magTypeSchema,
+    seat: z.number().int().min(1).max(4),
+    overrideReason: z.string().max(500).optional(),
+  })
+  .strict();
+
+export const magtuturoGenerateSchema = z
+  .object({
+    weekId: z.string().uuid().optional(),
+    year: z.number().int().min(1900).max(2999).optional(),
+    month: z.number().int().min(1).max(12).optional(),
+  })
+  .strict()
+  .refine((v) => Boolean(v.weekId) || (v.year !== undefined && v.month !== undefined), {
+    message: "either weekId (weekly) or year+month (monthly) is required",
+  });
+
+export type MagtuturoAssignInput = z.infer<typeof magtuturoAssignSchema>;
+export type MagtuturoGenerateInput = z.infer<typeof magtuturoGenerateSchema>;
 export type TeacherCreateInput = z.infer<typeof teacherCreateSchema>;
+export type TeacherDuty = z.infer<typeof dutySchema>;
 export type DakoCreateInput = z.infer<typeof dakoCreateSchema>;
 export type AvailabilityUpsertInput = z.infer<typeof availabilityUpsertSchema>;
 export type AssignmentCreateInput = z.infer<typeof assignmentCreateSchema>;

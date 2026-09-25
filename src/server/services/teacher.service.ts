@@ -4,7 +4,14 @@ import { teachers, dako } from "@/server/db/schema";
 import { teacherCreateSchema, teacherUpdateSchema, type TeacherCreateInput } from "@/lib/validation/schemas";
 import { ValidationError, NotFoundError, ConflictError } from "@/lib/errors";
 import { audit, type AuditEntry } from "./audit.service";
-import { assignDestination, closeActiveDestination } from "./destination-history.service";
+import {
+  activePeriodDuty,
+  assignDestination,
+  closeActiveDestination,
+  isDuty,
+  syncOpenPeriodDuty,
+  type Duty,
+} from "./destination-history.service";
 import type { SessionUser } from "@/server/auth/session";
 import { calculateAge, elapsedSince } from "@/lib/anniversary";
 
@@ -35,8 +42,13 @@ export async function createTeacher(
       const row = inserted[0]!;
       // E-3: a teacher created WITH a destination starts their first real
       // destination-history period at creation (today) — no dates invented.
+      // New Update #7 — the form's duty travels WITH the relationship (and is
+      // mirrored onto the teacher row by assignDestination).
       if (input.currentDestinationId) {
-        await assignDestination(row.id, input.currentDestinationId, actor, { tx });
+        await assignDestination(row.id, input.currentDestinationId, actor, {
+          tx,
+          duty: isDuty(input.duty) ? input.duty : null,
+        });
       }
       await audit(
         { user: actor, action: "CREATED_TEACHER", entityType: "teacher", entityId: row.id, newValue: row },
@@ -77,7 +89,19 @@ export async function updateTeacher(
         Boolean(patch.currentDestinationId) && patch.currentDestinationId !== prior.currentDestinationId;
       const { currentDestinationId: _dest, ...rest } = patch;
       if (destChanged) {
-        await assignDestination(id, patch.currentDestinationId!, actor, { tx });
+        // The duty travelling with the destination is the patch's when it names
+        // one, otherwise the teacher's recorded duty — never invented.
+        const effectiveDuty: Duty | null = isDuty(patch.duty)
+          ? patch.duty
+          : isDuty(prior.duty)
+            ? prior.duty
+            : null;
+        await assignDestination(id, patch.currentDestinationId!, actor, { tx, duty: effectiveDuty });
+      } else if (patch.duty !== undefined && patch.duty !== prior.duty) {
+        // Master-data duty edit with the destination unchanged: keep the OPEN
+        // relationship period aligned so the relationship stays the single
+        // source of truth (no period is created or ended).
+        await syncOpenPeriodDuty(id, patch.duty, tx);
       }
       const fields = Object.keys(rest).length > 0 ? rest : null;
       const updated = fields
@@ -167,6 +191,7 @@ export interface TeacherListRow {
   firstName: string;
   middleName: string | null;
   lastName: string;
+  suffix: string | null;
   birthday: string | null;
   purokGrupo: string | null;
   language: string;
@@ -219,6 +244,7 @@ export async function listTeachers(opts: TeacherListOptions = {}): Promise<{ row
       firstName: teachers.firstName,
       middleName: teachers.middleName,
       lastName: teachers.lastName,
+      suffix: teachers.suffix,
       birthday: teachers.birthday,
       purokGrupo: teachers.purokGrupo,
       language: teachers.language,
@@ -260,14 +286,24 @@ export interface ChangeDestinationResult {
 /**
  * §7 Current Destination change: reference-level only. Touches nothing else —
  * no assignments, no history, no availability. Audited with reason.
+ *
+ * New Update #7 — the change also carries the DUTY held at the new destination
+ * ('DESTINADO' | 'KATUWANG' only). It is stored on the destination period (and
+ * mirrored to teachers.duty by assignDestination), so a later destination change
+ * leaves the old period — and its duty — preserved in history. Setting a
+ * destination without a duty is rejected; clearing one needs no duty.
  */
 export async function changeCurrentDestination(
   teacherId: string,
   newDestinationId: string | null,
   reason: string,
   actor: SessionUser,
+  duty?: Duty | null,
 ): Promise<ChangeDestinationResult> {
   if (!reason.trim()) throw new ValidationError("reason is required to change Current Destination");
+  if (newDestinationId && !isDuty(duty)) {
+    throw new ValidationError("duty is required when setting a Current Destination (DESTINADO or KATUWANG)");
+  }
   return withTransaction(async (tx) => {
     const before = await tx.select().from(teachers).where(eq(teachers.id, teacherId)).limit(1);
     const teacher = before[0];
@@ -289,7 +325,7 @@ export async function changeCurrentDestination(
     // assignDestination re-reads the row and treats "already equals target"
     // as a same-destination no-op.
     if (newDestinationId) {
-      await assignDestination(teacherId, newDestinationId, actor, { tx });
+      await assignDestination(teacherId, newDestinationId, actor, { tx, duty: duty as Duty });
     } else {
       await closeActiveDestination(teacherId, tx);
     }
@@ -307,8 +343,10 @@ export async function changeCurrentDestination(
         action: "CHANGED_CURRENT_DESTINATION",
         entityType: "teacher",
         entityId: teacherId,
-        oldValue: { currentDestinationId: teacher.currentDestinationId },
-        newValue: { currentDestinationId: newDestinationId },
+        oldValue: { currentDestinationId: teacher.currentDestinationId, duty: teacher.duty },
+        newValue: newDestinationId
+          ? { currentDestinationId: newDestinationId, duty: duty as Duty }
+          : { currentDestinationId: null, destinationCleared: true },
         reason,
       },
       tx as Database,
@@ -321,6 +359,8 @@ export async function changeCurrentDestination(
 export interface TeacherDetails {
   teacher: typeof teachers.$inferSelect;
   currentDestination: { id: string; name: string; status: string } | null;
+  /** Duty of the OPEN destination period — the relationship's duty, not a guess. */
+  currentDuty: Duty | null;
   age: number | null;
   inactiveFor: { years: number; months: number } | null;
 }
@@ -339,7 +379,10 @@ export async function getTeacherDetails(id: string): Promise<TeacherDetails> {
   }
   const age = teacher.birthday ? calculateAge(teacher.birthday) : null;
   const inactiveFor = teacher.status === "INACTIVE" && teacher.dateInactive ? elapsedSince(teacher.dateInactive) : null;
-  return { teacher, currentDestination, age, inactiveFor };
+  // The RELATIONSHIP's duty (open period) — the teacher page must not show a
+  // stale global value after a destination change.
+  const currentDuty = teacher.currentDestinationId ? await activePeriodDuty(id) : null;
+  return { teacher, currentDestination, currentDuty, age, inactiveFor };
 }
 
 function todayISO(): string {

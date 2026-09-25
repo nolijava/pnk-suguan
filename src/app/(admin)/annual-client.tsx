@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AnnualSchedule } from "@/lib/annual";
 import { Modal } from "./_components/modal";
@@ -46,6 +46,16 @@ export interface AnnualTablesProps {
   currentIsoLabel: string;
   /** Phase 6 — persisted absence/modification provenance for tooltips (§7/§14). */
   cellInfo: { absentInfo: CellAbsentInfo[]; modifiedInfo: CellModifiedInfo[] };
+  /**
+   * Update #23 — per-ISO-week Weekly Availability readiness (keyed by week
+   * number) for the selected year, rendered on every week column header.
+   * Presentation-only and read-only: it is the same readiness the generation
+   * gate computes. Omitted ⇒ no indicator (never a false claim).
+   */
+  availabilityByWeek?: Record<
+    number,
+    { ready: boolean; missing: number; total: number; weekId: string | null }
+  >;
   /** Whether the current user may open the action prompt (server still enforces). */
   writable: boolean;
   /** Needed to match the server rule that only the grant HOLDER may write. */
@@ -71,15 +81,104 @@ interface ReplacementCandidate {
   language: string;
 }
 
-/** §6/§13 — accessible badges; never color alone. */
-function AbsentBadge() {
-  return <span className="badge badge-absent">ABSENT</span>;
-}
-function UpdatedBadge() {
-  return <span className="badge badge-updated">[UPDATED]</span>;
+/**
+ * Update #20 — icon-only MICRO cell badges (below the teacher name).
+ *
+ * Each identifier keeps its own DISTINCTIVE circular badge color (the 2px
+ * circle stroke + soft fill share one hue per identifier — hues never repeat
+ * across identifiers); the icon inside reuses one neutral stroke color.
+ * Meaning is never carried by color alone: every badge has an aria-label, and
+ * the cell tooltip repeats each badge with its text label (informational only).
+ */
+export const CELL_BADGES: Record<string, { label: string; paths: string[] }> = {
+  PUBLISHED: { label: "PUBLISHED", paths: ["M2 5.4 4.1 7.5 8 3.2"] },
+  FINALIZED: { label: "FINALIZED", paths: ["M3 4.7V3.5a2 2 0 0 1 4 0v1.2", "M2.4 4.7h5.2v3.7H2.4z"] },
+  OVERRIDE: { label: "OVERRIDE", paths: ["M5.6 1 2.8 5.7h2.1L4.5 9 7.6 4.3H5.5z"] },
+  MANUAL: { label: "MANUAL", paths: ["M2 8.2 2.6 6.1 6.8 1.9 8.3 3.4 4.1 7.6z"] },
+  HISTORICAL: { label: "HISTORICAL", paths: ["M5 1.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z", "M5 3.2V5l1.6 1"] },
+  UPDATED: { label: "UPDATED", paths: ["M8.2 5A3.2 3.2 0 1 1 7 2.6", "M7.8 1.1v2.2H5.6"] },
+  ABSENT: { label: "ABSENT", paths: ["M2.6 2.6 7.4 7.4", "M7.4 2.6 2.6 7.4"] },
+};
+
+function MicroBadgeIcon({ badge }: { badge: string }) {
+  const def = CELL_BADGES[badge];
+  if (!def) return null;
+  return (
+    <svg viewBox="0 0 10 10" aria-hidden="true" focusable="false">
+      {def.paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
 }
 
-/** §28 — source indicator; HISTORICAL is visually distinct from MANUAL/OVERRIDE. */
+/** One horizontal line of micro badges — never wraps (Update #20). */
+function CellBadges({ badges }: { badges: string[] }) {
+  if (badges.length === 0) return null;
+  return (
+    <span className="cell-badges">
+      {badges.map((b) => (
+        <span
+          key={b}
+          className={`cell-badge cb-${b.toLowerCase()}`}
+          data-badge={b}
+          role="img"
+          aria-label={CELL_BADGES[b]?.label ?? b}
+        >
+          <MicroBadgeIcon badge={b} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Update #23 — the per-week Weekly Availability readiness mark on a week column
+ * header. It is the SAME read-only readiness the generation gate computes, so a
+ * green week generates and an amber week blocks — the operator sees it BEFORE
+ * pressing Confirm instead of discovering it on failure.
+ *
+ * Meaning is never carried by colour alone: the dot's SHAPE differs (filled =
+ * ready, ring = blocked) and both the accessible name and the native tooltip
+ * state the exact count. The mark links straight to that week's Weekly
+ * Availability — and a BLOCKED week goes there in “fix availability” mode
+ * (Update #24: `fix=1`), which highlights the teachers still needing
+ * availability and offers the one-click fill, so a blocked week is one click
+ * from being fixed rather than one click from a page to search through.
+ */
+function WeekReadinessMark({
+  week,
+  year,
+  readiness,
+}: {
+  week: number;
+  year: number;
+  readiness: { ready: boolean; missing: number; total: number } | undefined;
+}) {
+  if (!readiness) return null;
+  const label = readiness.ready
+    ? `Week ${week}: availability ready — all ${readiness.total} required teachers are encoded`
+    : `Week ${week}: availability missing for ${readiness.missing} of ${readiness.total} required teachers — generation is blocked. Click to fix availability.`;
+  return (
+    <a
+      className={`week-ready-link${readiness.ready ? "" : " is-fix"}`}
+      href={
+        readiness.ready
+          ? `/availability?year=${year}&week=${week}`
+          : `/availability?year=${year}&week=${week}&fix=1`
+      }
+      aria-label={label}
+      title={label}
+    >
+      <span
+        className={`week-ready ${readiness.ready ? "is-ready" : "is-blocked"}`}
+        aria-hidden="true"
+      />
+    </a>
+  );
+}
+
+/** §28 — source indicator for the ACTION PROMPT dialog (text label there). */
 function SourceBadge({ source }: { source: string }) {
   return (
     <span className={source === "HISTORICAL" ? "badge badge-historical" : "badge badge-gray"}>
@@ -109,13 +208,16 @@ export function AnnualTables({
   currentWeekKey,
   currentIsoLabel,
   cellInfo,
+  availabilityByWeek,
   writable,
   currentUserId,
   correctionsByWeek,
 }: AnnualTablesProps) {
   const router = useRouter();
   const wrapRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const syncing = useRef(false);
+  // Update #15 — SUGO-ONLY additional top horizontal scrollbar (synced below).
+  const topScrollRef = useRef<HTMLDivElement | null>(null);
+  const topScrollInnerRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -175,6 +277,26 @@ export function AnnualTables({
     return w?.active
       ? "FINALIZED — a revision window is open for another user; changes run through the Weekly Schedule."
       : "FINALIZED — enable revision on the Weekly Schedule page to make audited corrections. The week stays FINALIZED.";
+  };
+
+  /**
+   * Update #20 — the badge set shown under the teacher name (and repeated with
+   * text labels at the bottom of the tooltip). Existing identifiers only:
+   * assignment source (§28), week lock state, [UPDATED], ABSENT.
+   */
+  const badgesFor = (
+    source: string | null,
+    weekNumber: number,
+    modified: boolean,
+    absent: boolean,
+  ): string[] => {
+    const out: string[] = [];
+    if (source && source !== "AUTO" && source in CELL_BADGES) out.push(source);
+    const lock = lockLabelOf(weekNumber);
+    if (lock) out.push(lock);
+    if (modified) out.push("UPDATED");
+    if (absent) out.push("ABSENT");
+    return out;
   };
 
   const effectiveReason = () => (reasonChoice === "Other" ? customReason.trim() : reasonChoice);
@@ -271,33 +393,85 @@ export function AnnualTables({
     return m;
   }, [cellInfo.modifiedInfo]);
 
-  // --- synchronized horizontal scrolling (Phase 5 pattern) ------------------
-  // Native listeners (scroll doesn't bubble reliably through React's root
-  // delegation in all cases); the syncing guard ALWAYS resets, even if an
-  // element detaches mid-scroll (HMR/unmount), so sync can never wedge.
+  // --- synchronized horizontal scrolling (Phase 5 pattern; Update #16) --------
+  // Echo-safe rAF sync: scroll events caused by our own scrollLeft writes are
+  // absorbed by the WeakMap echo-tag (no feedback loop, no oscillation), only
+  // genuine user scrolls propagate, and writes are coalesced into one rAF so
+  // the three tables + SUGO top scrollbar glide without jumping or snapback.
+  const syncEls = useRef<HTMLElement[]>([]);
+  const scrollEcho = useRef(new WeakMap<HTMLElement, number>());
+  const syncRaf = useRef<number | null>(null);
+
+  function syncGroup(): HTMLElement[] {
+    const els: HTMLElement[] = wrapRefs.current.filter((e): e is HTMLDivElement => e !== null);
+    const top = topScrollRef.current;
+    return top ? [...els, top] : els;
+  }
+
+  function applySyncFrom(src: HTMLElement) {
+    const left = src.scrollLeft;
+    for (const el of syncEls.current) {
+      if (el === src || !el.isConnected) continue;
+      if (Math.abs(el.scrollLeft - left) < 1) continue; /* equality guard */
+      scrollEcho.current.set(el, left);
+      el.scrollLeft = left;
+    }
+  }
+
   useEffect(() => {
-    const els = wrapRefs.current.filter((e): e is HTMLDivElement => e !== null);
-    function onScroll(this: HTMLDivElement) {
-      if (syncing.current) return;
-      syncing.current = true;
-      try {
-        for (const el of els) {
-          if (el !== this && el.isConnected) el.scrollLeft = this.scrollLeft;
-        }
-      } finally {
-        syncing.current = false;
+    const els = syncGroup();
+    syncEls.current = els;
+    // Update #15 — keep the top track exactly as wide as the SUGO matrix so the
+    // two scroll ranges match 1:1 (runtime measure; the calc() inline style is
+    // the static fallback).
+    const topEl = topScrollRef.current;
+    const topInner = topScrollInnerRef.current;
+    const sugoWrap =
+      (topEl?.parentElement?.querySelector(".annual-scroll") as HTMLElement | null) ?? null;
+    const sugoTable = sugoWrap?.querySelector("table") ?? null;
+    let widthRO: ResizeObserver | null = null;
+    function measureTopTrack() {
+      if (topInner && sugoWrap) topInner.style.width = `${sugoWrap.scrollWidth}px`;
+    }
+    measureTopTrack();
+    requestAnimationFrame(measureTopTrack);
+    window.addEventListener("resize", measureTopTrack);
+    if (sugoTable && "ResizeObserver" in window) {
+      widthRO = new ResizeObserver(measureTopTrack);
+      widthRO.observe(sugoTable);
+    }
+    function onScroll(this: HTMLElement) {
+      const expected = scrollEcho.current.get(this);
+      if (expected !== undefined && Math.abs(this.scrollLeft - expected) < 1) {
+        /* our own write echoing back — absorb silently */
+        return;
       }
+      scrollEcho.current.delete(this);
+      const src = this;
+      if (syncRaf.current !== null) cancelAnimationFrame(syncRaf.current);
+      syncRaf.current = requestAnimationFrame(() => {
+        syncRaf.current = null;
+        applySyncFrom(src);
+      });
     }
     els.forEach((el) => el.addEventListener("scroll", onScroll, { passive: true }));
-    return () => els.forEach((el) => el.removeEventListener("scroll", onScroll));
+    return () => {
+      els.forEach((el) => el.removeEventListener("scroll", onScroll));
+      if (syncRaf.current !== null) cancelAnimationFrame(syncRaf.current);
+      syncRaf.current = null;
+      syncEls.current = [];
+      window.removeEventListener("resize", measureTopTrack);
+      widthRO?.disconnect();
+    };
   }, [schedule.year]);
 
   // Master plan §29 — on dashboard open, auto-position the synchronized
   // horizontal scroll so the CURRENT ISO week is immediately visible (without
   // hiding the rest of the year). Only when viewing the current ISO year; a
-  // different year is never force-scrolled. Week columns are equal-width
-  // (var(--week-col)), so the target offset derives from the week index and
-  // the sticky dako column width. Runs once per year render, after tables mount.
+  // different year is never force-scrolled. Week column widths are synced
+  // across the matrices but may vary per week (content-sized), so the target
+  // offset accumulates the measured widths of the preceding week columns.
+  // Runs once per year render, after tables mount.
   useEffect(() => {
     if (!currentWeekKey) return; // non-current year — no false positioning
     const els = wrapRefs.current.filter((e): e is HTMLDivElement => e !== null);
@@ -317,8 +491,13 @@ export function AnnualTables({
     // Center the current week in the visible area where possible; clamp to
     // the scrollable range. The dako column is sticky (always visible), so
     // the offset is measured from the scroll container's left edge.
+    const weekHeaders = first.querySelectorAll("thead th");
+    let weeksBefore = 0;
+    for (let i = 0; i < weekIdx; i++) {
+      weeksBefore += weekHeaders[i + 1]?.getBoundingClientRect().width ?? weekW;
+    }
     const max = first.scrollWidth - first.clientWidth;
-    const absolute = stickyW + weekIdx * weekW;
+    const absolute = stickyW + weeksBefore;
     const desired = Math.max(0, Math.min(max, absolute - first.clientWidth / 2));
     for (const el of els) el.scrollLeft = desired;
   }, [schedule.year, schedule.weekCount, currentWeekKey]);
@@ -340,6 +519,68 @@ export function AnnualTables({
       delete t.dataset.hotCol;
     });
   }
+
+  /*
+   * Cross-matrix week-column alignment. The three matrices are separate
+   * tables, and the browser sizes each table's week columns to ITS own
+   * content — so a week holding assigned teachers rendered wider in SUGO than
+   * the same (empty) week in RESERBA / RESERBA II. Measure every week
+   * column's natural content width across ALL tables and force the per-week
+   * maximum onto every table's <col>, so week N keeps one width in every
+   * matrix even when the other blocks have nothing in it. Measurement is
+   * content-only (the chips are nowrap, so offsetWidth is their natural
+   * width) — idempotent, and columns shrink again when shorter names land.
+   */
+  useLayoutEffect(() => {
+    const root = sectionRef.current;
+    if (!root) return;
+    const tables = Array.from(root.querySelectorAll<HTMLTableElement>(".annual-table"));
+    if (tables.length === 0) return;
+    const count = schedule.weekCount;
+
+    const apply = () => {
+      const base =
+        parseFloat(getComputedStyle(tables[0]!).getPropertyValue("--week-col")) || 88;
+      const widths = new Array<number>(count).fill(0);
+      for (const t of tables) {
+        for (const row of Array.from(t.querySelectorAll("tr"))) {
+          for (let i = 0; i < count; i++) {
+            const cell = row.children[i + 1] as HTMLElement | undefined;
+            if (!cell) continue;
+            const chip = cell.querySelector<HTMLElement>(".cell-btn, .cell-static");
+            if (!chip) continue;
+            const cs = getComputedStyle(cell);
+            const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+            widths[i] = Math.max(widths[i] ?? 0, chip.offsetWidth + pad);
+          }
+        }
+      }
+      for (const t of tables) {
+        const cols = t.querySelectorAll<HTMLTableColElement>("colgroup col");
+        for (let i = 0; i < count; i++) {
+          const col = cols[i + 1];
+          if (!col) continue;
+          const next = `${Math.max(widths[i] ?? 0, base)}px`;
+          if (col.style.width !== next) col.style.width = next;
+        }
+      }
+    };
+
+    apply();
+    const raf = requestAnimationFrame(apply);
+    window.addEventListener("resize", apply);
+    document.fonts?.ready.then(apply).catch(() => undefined);
+    let ro: ResizeObserver | null = null;
+    if ("ResizeObserver" in window) {
+      ro = new ResizeObserver(apply);
+      tables.forEach((t) => ro!.observe(t));
+    }
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", apply);
+      ro?.disconnect();
+    };
+  }, [schedule]);
   /* ---------------------------------------------------------------- */
   /* Cell tooltip — body-level layer (approved fix): the old in-cell
      tooltip was trapped by .annual-scroll's overflow clipping AND by the
@@ -376,11 +617,42 @@ export function AnnualTables({
     const tip = tipRef.current;
     if (!tip) return;
     const src = trigger.querySelector(":scope > .cell-info-src");
-    if (!src) {
+    const text = src?.textContent ?? "";
+    // Update #20 — the cell's micro badges repeat as icon + text label at the
+    // bottom of the tooltip (the meaning hidden by the compact cell).
+    const badgeEls = trigger.querySelectorAll<HTMLElement>(".cell-badges .cell-badge");
+    if (!text && badgeEls.length === 0) {
       hideTip();
       return;
     }
-    tip.textContent = src.textContent ?? "";
+    tip.replaceChildren();
+    if (text) {
+      const p = document.createElement("div");
+      p.textContent = text;
+      tip.appendChild(p);
+    }
+    if (badgeEls.length > 0) {
+      const row = document.createElement("div");
+      row.className = "cell-tooltip-badges";
+      badgeEls.forEach((el) => {
+        const key = el.dataset.badge ?? "";
+        const def = CELL_BADGES[key];
+        if (!def) return;
+        const item = document.createElement("span");
+        item.className = "cell-tooltip-badge";
+        const icon = document.createElement("span");
+        icon.className = el.className;
+        icon.innerHTML =
+          '<svg viewBox="0 0 10 10" aria-hidden="true">' +
+          def.paths.map((d) => `<path d="${d}"/>`).join("") +
+          "</svg>";
+        const label = document.createElement("span");
+        label.textContent = def.label;
+        item.append(icon, label);
+        row.appendChild(item);
+      });
+      tip.appendChild(row);
+    }
     tip.style.width = "min(400px, 78vw)";
     const rect = trigger.getBoundingClientRect();
     const vw = window.innerWidth;
@@ -473,6 +745,21 @@ export function AnnualTables({
         <span className="info-note">Current ISO week: {currentIsoLabel}</span>
       </div>
 
+      {/* Update #23 — legend for the per-week readiness marks (a tooltip alone
+          would leave the dots unexplained until hovered). */}
+      {availabilityByWeek ? (
+        <p className="week-readiness-legend">
+          <span className="week-readiness-legend-item">
+            <span className="week-ready is-ready" aria-hidden="true" />
+            Availability ready
+          </span>
+          <span className="week-readiness-legend-item">
+            <span className="week-ready is-blocked" aria-hidden="true" />
+            Availability missing — generation blocked
+          </span>
+        </p>
+      ) : null}
+
       {notice ? (
         <p className="success-note" role="status">
           {notice}{" "}
@@ -488,6 +775,29 @@ export function AnnualTables({
           <h2>
             {TYPE_LABEL[table.assignmentType]} — {schedule.year}
           </h2>
+        {/* Update #15 — the SUBJECT line sits OUTSIDE the scroll box so it
+            stays fixed while the matrix content scrolls horizontally. */}
+        <p className="annual-subject">
+          {TYPE_LABEL[table.assignmentType]} · {schedule.year} · Dako × ISO week ({schedule.weekCount} weeks)
+        </p>
+        {table.assignmentType === "SUGO" ? (
+          /* Update #15 — additional top horizontal scrollbar, SUGO ONLY.
+             A plain sync partner of the SUGO scroll box (not a shared
+             top-scroll component — no other table gets one). */
+          <div
+            className="annual-top-scroll"
+            ref={topScrollRef}
+            aria-hidden="true"
+          >
+            <div
+              className="annual-top-scroll-inner"
+              ref={topScrollInnerRef}
+              style={{
+                width: `calc(var(--dako-col-w) + var(--week-col) * ${schedule.weekCount})`,
+              }}
+            />
+          </div>
+        ) : null}
           <div
             className="annual-scroll"
             ref={(el) => {
@@ -498,15 +808,22 @@ export function AnnualTables({
             aria-label={`${TYPE_LABEL[table.assignmentType]} annual schedule ${schedule.year}`}
           >
             <table className="annual-table">
-              <caption className="info-note">
-                {TYPE_LABEL[table.assignmentType]} · {schedule.year} · Dako × ISO week ({schedule.weekCount} weeks)
-              </caption>
+              <colgroup>
+                <col style={{ width: "var(--dako-col-w)" }} />
+                {weeks.map((w) => (
+                  <col key={w} style={{ width: "var(--week-col)" }} />
+                ))}
+              </colgroup>
               <thead>
                 <tr>
                   <th scope="col" className="dako-col">Dako</th>
                   {weeks.map((w) => (
                     <th key={w} scope="col" className={currentWeekKey === weekLabel(w) ? "current-week" : undefined}>
-                      {weekLabel(w)}
+                      {/* Update #23 — week label + readiness mark (ready/blocked). */}
+                      <span className="week-col-head">
+                        {weekLabel(w)}
+                        <WeekReadinessMark week={w} year={schedule.year} readiness={availabilityByWeek?.[w]} />
+                      </span>
                     </th>
                   ))}
                 </tr>
@@ -519,7 +836,10 @@ export function AnnualTables({
                 ) : (
                   table.dakoRows.map((d) => (
                     <tr key={d.dakoId}>
-                      <th scope="row" className="dako-col">
+                      {/* New Update #1 — `dako-row-head` renders the Dako NAME at
+                          8pt (matching the teacher names) without touching the
+                          column HEADER or the sticky-column metrics above. */}
+                      <th scope="row" className="dako-col dako-row-head">
                         {d.dakoName}
                         {d.disabled ? <span className="badge badge-gray">DISABLED</span> : null}
                       </th>
@@ -542,10 +862,8 @@ export function AnnualTables({
                                   }
                                   aria-haspopup="dialog"
                                 >
-                                  <span>{c.teacherName}</span>
-                                  {c.source && c.source !== "AUTO" ? <SourceBadge source={c.source} /> : null}
-                                  {modified ? <UpdatedBadge /> : null}
-                                  {absent ? <AbsentBadge /> : null}
+                                  <span className="cell-name">{c.teacherName}</span>
+                                  <CellBadges badges={badgesFor(c.source, i + 1, Boolean(modified), Boolean(absent))} />
                                   {absent || modified ? (
                                     <span className="cell-info-src">
                                       {absent
@@ -558,13 +876,8 @@ export function AnnualTables({
                                 </button>
                               ) : (
                                 <span className="cell-static" tabIndex={0}>
-                                  <span>{c.teacherName}</span>
-                                  {c.source && c.source !== "AUTO" ? <SourceBadge source={c.source} /> : null}
-                                  {lockLabelOf(i + 1) ? (
-                                    <span className="badge badge-gray">{lockLabelOf(i + 1)}</span>
-                                  ) : null}
-                                  {modified ? <UpdatedBadge /> : null}
-                                  {absent ? <AbsentBadge /> : null}
+                                  <span className="cell-name">{c.teacherName}</span>
+                                  <CellBadges badges={badgesFor(c.source, i + 1, Boolean(modified), Boolean(absent))} />
                                   {absent || modified ? (
                                     <span className="cell-info-src">
                                       {absent
@@ -581,8 +894,8 @@ export function AnnualTables({
                                  still visibly indicate the absence, from persisted
                                  audit data (not color alone, hover AND focus). */
                               <span className="cell-static" tabIndex={0}>
-                                <span className="info-note">{absent.teacherName}</span>
-                                <AbsentBadge />
+                                <span className="cell-name info-note">{absent.teacherName}</span>
+                                <CellBadges badges={["ABSENT"]} />
                                 <span className="cell-info-src">
                                   {`${absent.teacherName} — ABSENT · Reason: ${absent.reason} · Week: ${weekLabel(i + 1)} · ${TYPE_LABEL[table.assignmentType]} · Recorded by: ${absent.actorName ?? "unknown"} · At: ${fmtDate(absent.at)}`}
                                 </span>

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { DakoService } from "@/server/services";
-import { FormField, SelectField, TextAreaField, Notice, StatusBadge } from "@/app/(admin)/_components";
+import { FormField, SelectField, TextAreaField, Notice, StatusBadge, ConfirmSubmit, UnsavedBack } from "@/app/(admin)/_components";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,7 @@ export default async function EditDakoPage({
           name: get("name"),
           address: get("address"),
           dateEstablished: get("dateEstablished") || undefined,
-          purokGrupo: get("purokGrupo") || undefined,
+          isPriority: formData.get("isPriority") === "on",
           worshipDay: get("worshipDay") as "SUNDAY",
           worshipTime: get("worshipTime"),
           language: get("language") as "FILIPINO" | "ENGLISH",
@@ -63,6 +63,7 @@ export default async function EditDakoPage({
         <Link className="btn btn-secondary" href={`/dako/${id}`}>Back to details</Link>
       </div>
       {error ? <Notice kind="error">{error}</Notice> : null}
+      <UnsavedBack href={`/dako/${id}`} />
       <form action={saveAction} className="card form-col">
         <div className="form-grid">
           {/* Phase 6 §23 — Dako Code is immutable; keep it visible read-only. */}
@@ -70,7 +71,7 @@ export default async function EditDakoPage({
           <FormField label="Dako Name" name="name" required defaultValue={d.name} />
           <FormField label="Address" name="address" required defaultValue={d.address} />
           <FormField label="Date Established" name="dateEstablished" type="date" defaultValue={d.dateEstablished} />
-          <FormField label="Purok/Grupo" name="purokGrupo" defaultValue={d.purokGrupo} />
+          <p className="form-span"><label><input type="checkbox" name="isPriority" defaultChecked={d.isPriority} /> Priority Dako</label> <span className="info-note">Multiple dakos may be Priority — Priority dakos receive RESERBA assignment priority first (Update #6).</span></p>
           <SelectField label="Worship Day" name="worshipDay" required options={DAY_OPTIONS} defaultValue={d.worshipDay} />
           <FormField label="Worship Time" name="worshipTime" type="time" required defaultValue={d.worshipTime} />
           <SelectField
@@ -84,8 +85,18 @@ export default async function EditDakoPage({
         </div>
         <p className="info-note">Status changes use Enable/Disable with confirmation and a required reason.</p>
         <div className="actions-row">
-          <button type="submit" className="btn btn-primary">Save Changes</button>
-          <Link className="btn btn-secondary" href={`/dako/${id}`}>Cancel</Link>
+          <ConfirmSubmit
+            label="Save Changes"
+            confirmTitle="Save Dako Changes"
+            confirmDescription="Update this Dako record with the entered data."
+            confirmLabel="Save"
+            summaryFields={[
+              { name: "name", label: "Dako Name" },
+              { name: "address", label: "Address" },
+              { name: "language", label: "Language" },
+            ]}
+          />
+          <UnsavedBack href={`/dako/${id}`} />
         </div>
       </form>
     </>

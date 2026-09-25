@@ -245,10 +245,18 @@ describe("Current Destination — set/change/clear + integrity (§9/§10)", () =
     assignmentCountBefore = (await snap()).assignments;
   });
 
-  it("set: assigns destination, requires reason, audits old→new", async () => {
+  it("set: assigns destination + duty, requires reason, audits old→new", async () => {
     const before = await snap();
-    const res = await TeacherService.changeCurrentDestination(teacher.id, dakoA.id, "initial assignment", admin);
+    // New Update #7 — a set now carries the duty held at the destination.
+    const res = await TeacherService.changeCurrentDestination(
+      teacher.id,
+      dakoA.id,
+      "initial assignment",
+      admin,
+      "DESTINADO",
+    );
     expect(res.teacher.currentDestinationId).toBe(dakoA.id);
+    expect(res.teacher.duty).toBe("DESTINADO");
     expect(res.previousDestinationId).toBeNull();
     const logs = await db
       .select()
@@ -257,17 +265,24 @@ describe("Current Destination — set/change/clear + integrity (§9/§10)", () =
     expect(logs).toHaveLength(1);
     expect((logs[0]!.oldValue as { currentDestinationId: string | null }).currentDestinationId).toBeNull();
     expect((logs[0]!.newValue as { currentDestinationId: string }).currentDestinationId).toBe(dakoA.id);
+    expect((logs[0]!.newValue as { duty: string }).duty).toBe("DESTINADO");
     expect(logs[0]!.reason).toBe("initial assignment");
     expect(logs[0]!.userId).toBe(admin.userId);
     expect(logs[0]!.createdAt).toBeInstanceOf(Date);
+    // Duty is REQUIRED to set a destination — enforced by the service.
+    const other = await TeacherService.createTeacher(teacherInput("P2-019"), admin);
+    await expect(
+      TeacherService.changeCurrentDestination(other.id, dakoA.id, "no duty supplied", admin),
+    ).rejects.toThrow(/duty/);
     const after = await snap();
     expect(after).toEqual(before); // zero side effects on scheduling tables (audit growth is expected)
   });
 
-  it("change: A→B audited; scheduling data untouched", async () => {
+  it("change: A→B audited; the new duty is stored and mirrored", async () => {
     const before = await snap();
-    const res = await TeacherService.changeCurrentDestination(teacher.id, dakoB.id, "transfer", admin);
+    const res = await TeacherService.changeCurrentDestination(teacher.id, dakoB.id, "transfer", admin, "KATUWANG");
     expect(res.previousDestinationId).toBe(dakoA.id);
+    expect(res.teacher.duty).toBe("KATUWANG");
     const after = await snap();
     expect(after.assignments).toBe(before.assignments);
     expect(after.history).toBe(before.history);
@@ -296,13 +311,19 @@ describe("Current Destination — set/change/clear + integrity (§9/§10)", () =
     const disabled = await DakoService.createDako(dakoInput("PD-DIS"), admin);
     await DakoService.disableDako(disabled.id, "closed", admin);
     await expect(
-      TeacherService.changeCurrentDestination(teacher.id, disabled.id, "should fail", admin),
+      TeacherService.changeCurrentDestination(teacher.id, disabled.id, "should fail", admin, "DESTINADO"),
     ).rejects.toThrow(/ACTIVE/);
   });
 
   it("rejects unknown destination ids", async () => {
     await expect(
-      TeacherService.changeCurrentDestination(teacher.id, "00000000-0000-0000-0000-000000000000", "ghost", admin),
+      TeacherService.changeCurrentDestination(
+        teacher.id,
+        "00000000-0000-0000-0000-000000000000",
+        "ghost",
+        admin,
+        "DESTINADO",
+      ),
     ).rejects.toThrow(/valid dako/);
   });
 
@@ -331,7 +352,7 @@ describe("disabled dako as existing Current Destination (§11)", () => {
   beforeAll(async () => {
     teacher = await TeacherService.createTeacher(teacherInput("P2-030"), admin);
     dako = await DakoService.createDako(dakoInput("PE-1"), admin);
-    await TeacherService.changeCurrentDestination(teacher.id, dako.id, "initial", admin);
+    await TeacherService.changeCurrentDestination(teacher.id, dako.id, "initial", admin, "DESTINADO");
   });
 
   it("disabling the dako preserves the existing destination relationship", async () => {
@@ -406,21 +427,16 @@ describe("dako CRUD + validation (§12)", () => {
 });
 
 describe("dako list — search/filter/sort/pagination (§13/§14)", () => {
-  it("searches code/name/address/purok", async () => {
+  it("searches code/name/address", async () => {
     expect((await DakoService.listDako({ search: "PE-1" })).rows.length).toBeGreaterThanOrEqual(1);
     expect((await DakoService.listDako({ search: "Renamed" })).rows).toHaveLength(1);
   });
 
-  it("filters by status, language, purok, worship day (purok IS a dako filter)", async () => {
-    await DakoService.createDako(dakoInput("P2-045", { purokGrupo: "Purok Zone X", language: "ENGLISH", worshipDay: "WEDNESDAY" }), admin);
-    expect((await DakoService.listDako({ purokGrupo: "Purok Zone X" })).rows).toHaveLength(1);
+  it("filters by status, language, priority, worship day (Update #6: priority is a dako filter)", async () => {
+    await DakoService.createDako(dakoInput("P2-045", { isPriority: true, language: "ENGLISH", worshipDay: "WEDNESDAY" }), admin);
+    expect((await DakoService.listDako({ isPriority: true })).rows).toHaveLength(1);
     expect((await DakoService.listDako({ language: "ENGLISH", status: "ACTIVE" })).rows).toHaveLength(1);
     expect((await DakoService.listDako({ worshipDay: "WEDNESDAY" })).rows).toHaveLength(1);
-  });
-
-  it("lists distinct purok groups for the filter dropdown", async () => {
-    const groups = await DakoService.listDakoPurokGroups();
-    expect(groups).toContain("Purok Zone X");
   });
 
   it("sorts by whitelisted fields and paginates", async () => {

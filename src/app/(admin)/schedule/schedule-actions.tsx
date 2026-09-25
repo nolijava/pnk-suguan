@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { StatusBadge } from "../_components/status-badge";
 import { Modal } from "../_components/modal";
 
@@ -65,6 +66,23 @@ const RULE_LABEL: Record<string, string> = {
 /** Mirror of NON_OVERRIDEABLE_RULES (src/lib/eligibility.ts) for UX only. */
 const NON_OVERRIDEABLE: readonly string[] = ["DAKO_DISABLED", "LANGUAGE_MISMATCH"];
 
+/** Update #13 — category slider cycle: SUGO (default) → RESERBA → RESERBA II → SUGO. */
+const CAT_ORDER: readonly string[] = ["SUGO", "RESERBA", "RESERBA_II"];
+
+/**
+ * Update #22 — the Generate Schedule modal offers exactly these three methods.
+ * Manual is deliberately NOT offered here (it stays available per cell through
+ * Delegate/Override) and the modal carries no ISO-week field: the week shown by
+ * this page is the target week.
+ */
+type GenMode = "auto" | "destinado" | "katuwang";
+const GEN_MODES: GenMode[] = ["auto", "destinado", "katuwang"];
+const GEN_MODE_LABEL: Record<GenMode, string> = {
+  auto: "Auto-generate",
+  destinado: "Assign Destinado",
+  katuwang: "Assign Katuwang",
+};
+
 interface CandidateTeacher {
   teacherId: string;
   teacherCode: string;
@@ -117,10 +135,24 @@ export function ScheduleActions({
 }: ScheduleActionsProps) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const router = useRouter();
+  // Update #13 — sliding category switcher (view-only: no navigation, no
+  // history entries, no regeneration, selected ISO week untouched).
+  const [slideCat, setSlideCat] = useState<string>("SUGO");
+  const [slideDir, setSlideDir] = useState<"left" | "right">("right");
+  function slideBy(delta: 1 | -1) {
+    const i = Math.max(0, CAT_ORDER.indexOf(slideCat));
+    setSlideDir(delta === 1 ? "right" : "left");
+    setSlideCat(CAT_ORDER[(i + delta + CAT_ORDER.length) % CAT_ORDER.length]!);
+  }
   // True only while the generation request itself is in flight (real state).
   const [generating, setGenerating] = useState(false);
   const [showAbsentWarning, setShowAbsentWarning] = useState(false);
   const [freshCount, setFreshCount] = useState(0);
+  // Update #22 — the generation-method modal and its availability block notice.
+  const [showGenModal, setShowGenModal] = useState(false);
+  const [genMode, setGenMode] = useState<GenMode>("auto");
+  const [genBlocked, setGenBlocked] = useState<{ message: string } | null>(null);
 
   // Shared slot-assignment dialog state (§19/§20/§21).
   const [slot, setSlot] = useState<{ row: SlotRow; mode: "delegate" | "override" } | null>(null);
@@ -269,7 +301,7 @@ export function ScheduleActions({
     return res.ok ? body.data.count : 0;
   }
 
-  function generate() {
+  function generate(mode: GenMode = genMode) {
     setMessage(null);
     setGenerating(true);
     startTransition(async () => {
@@ -277,12 +309,24 @@ export function ScheduleActions({
         const res = await fetch("/api/scheduling/generate", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ weekId }),
+          body: JSON.stringify({ weekId, mode }),
         });
         const body = await res.json();
         if (!res.ok) {
-          setMessage({ kind: "error", text: body?.error?.message ?? "generation failed" });
+          const err = body?.error as { code?: string; message?: string } | undefined;
           setGenerating(false);
+          // Update #22 — the POST re-validates the same availability gate; a
+          // blocked attempt shows the blocking notice in the modal.
+          if (err?.code === "AVAILABILITY_REQUIRED") {
+            setGenBlocked({
+              message:
+                err.message ??
+                `Weekly Availability has not been set for one or more teachers for ISO Week ${weekNumber}, ${weekYear}. Please set the teacher availability before generating the Suguan.`,
+            });
+            setShowGenModal(true);
+            return;
+          }
+          setMessage({ kind: "error", text: err?.message ?? "generation failed" });
         } else {
           setMessage({
             kind: "success",
@@ -299,10 +343,45 @@ export function ScheduleActions({
     });
   }
 
-  function onGenerateClick() {
+  /**
+   * Update #22 — Confirm of the generation-method modal. The SELECTED ISO week is
+   * the week this page already displays ({weekYear}-W{weekNumber}); the server
+   * gate validates its availability BEFORE the engine runs, so a blocked attempt
+   * shows the blocking notice inside the modal and generates nothing. The POST
+   * endpoint re-validates server-side (the gate is never bypassable).
+   */
+  function confirmGenerate() {
     setMessage(null);
+    setGenBlocked(null);
+    const chosen = genMode;
     setGenerating(true);
     startTransition(async () => {
+      try {
+        const res = await fetch(
+          `/api/scheduling/generation-gate?weekId=${encodeURIComponent(weekId)}&mode=${chosen}`,
+        );
+        const body = await res.json();
+        if (!res.ok) {
+          const err = body?.error as { code?: string; message?: string } | undefined;
+          setGenerating(false);
+          if (err?.code === "AVAILABILITY_REQUIRED") {
+            setGenBlocked({
+              message:
+                err.message ??
+                `Weekly Availability has not been set for one or more teachers for ISO Week ${weekNumber}, ${weekYear}. Please set the teacher availability before generating the Suguan.`,
+            });
+            return;
+          }
+          setMessage({ kind: "error", text: err?.message ?? "availability check failed" });
+          return;
+        }
+      } catch {
+        setGenerating(false);
+        setMessage({ kind: "error", text: "network error — availability not checked" });
+        return;
+      }
+      // Gate passed — the existing §6 pre-generation warning flow is unchanged.
+      setShowGenModal(false);
       const n = await refreshAbsenceCount();
       if (n > 0) {
         // Waiting on the operator's decision — not a running operation.
@@ -310,7 +389,7 @@ export function ScheduleActions({
         setFreshCount(n);
         setShowAbsentWarning(true);
       } else {
-        generate();
+        generate(chosen);
       }
     });
   }
@@ -548,8 +627,9 @@ export function ScheduleActions({
           return;
         }
         closeSlotDialog();
-        setMessage({ kind: "success", text: "Assignment saved. Reloading…" });
-        window.location.reload();
+        // Update #13/14 — update the displayed table in place (no full-page reload).
+        setMessage({ kind: "success", text: "Assignment saved." });
+        router.refresh();
       } catch {
         setSlotErr("network error — assignment not saved");
         setReview(false);
@@ -596,7 +676,17 @@ export function ScheduleActions({
               </button>
           ) : null}
           {canGenerate && !locked ? (
-            <button type="button" className="btn btn-primary" onClick={onGenerateClick} disabled={pending || generating} aria-busy={generating}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setMessage(null);
+                setGenBlocked(null);
+                setShowGenModal(true);
+              }}
+              disabled={pending || generating}
+              aria-busy={generating}
+            >
               {generating ? <span className="spinner" aria-hidden="true" /> : null}
               {generating
                 ? "Generating…"
@@ -675,11 +765,29 @@ export function ScheduleActions({
         </p>
       ) : null}
 
-      {/* §31 — THREE SEPARATE sections: SUGO / RESERBA / RESERBA II. Never one merged table. */}
-      {["SUGO", "RESERBA", "RESERBA_II"].map((type) => {
-        const sectionRows = rows.filter((r) => r.assignmentType === type);
-        return (
-          <section key={type} className="sched-section">
+      {/* §31 — Update #13 sliding category switcher: exactly ONE of the three
+          separate sections (SUGO default) is visible at a time; never one merged
+          table. View-only switch — no navigation, no history entries, no
+          regeneration, selected ISO week untouched. */}
+      <div className="sched-slider">
+        <button
+          type="button"
+          className="slider-arrow"
+          aria-label="Previous category"
+          onClick={() => slideBy(-1)}
+          disabled={pending}
+        >
+          ‹
+        </button>
+        <div className="slider-viewport" aria-live="polite">
+          {(() => {
+            const type = slideCat;
+            const sectionRows = rows.filter((r) => r.assignmentType === type);
+            return (
+              <section
+                key={type}
+                className={`sched-section slider-panel ${slideDir === "left" ? "slide-in-left" : "slide-in-right"}`}
+              >
             <h2>{TYPE_LABEL[type] ?? type}</h2>
             <div className="table-wrap">
               <table>
@@ -709,6 +817,8 @@ export function ScheduleActions({
                               <div className="info-note">
                                 {r.reasonCode}: {r.reason}
                               </div>
+                            ) : r.reason ? (
+                              <div className="info-note">{r.reason}</div>
                             ) : null}
                           </td>
                         )}
@@ -734,8 +844,19 @@ export function ScheduleActions({
               </table>
             </div>
           </section>
-        );
-      })}
+            );
+          })()}
+        </div>
+        <button
+          type="button"
+          className="slider-arrow"
+          aria-label="Next category"
+          onClick={() => slideBy(1)}
+          disabled={pending}
+        >
+          ›
+        </button>
+      </div>
 
       {/* §24 — SUPER_ADMIN emergency unlock. Begin: role + server-verified
           secret + mandatory audited reason. End: re-locks immediately. The
@@ -842,6 +963,81 @@ export function ScheduleActions({
                 </button>
                 <button type="button" className="btn btn-primary" onClick={submitRevision} disabled={pending}>
                   {revisionMode === "begin" ? "Enable Revision" : "End Revision"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showGenModal ? (
+        <Modal
+          open
+          onClose={() => {
+            setShowGenModal(false);
+            setGenBlocked(null);
+          }}
+        >
+          <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Generate Schedule">
+            <div className="modal">
+              <h2>Generate Schedule</h2>
+              {/* Update #22 §6/§7 — NO ISO-week field: the week this page shows IS
+                  the target week. */}
+              <p className="info-note">
+                Target: ISO Week {weekNumber} — {weekYear} (the week currently open on this page).
+              </p>
+              <label>
+                How would you like to generate the weekly Suguan?
+                <select
+                  value={genMode}
+                  onChange={(e) => {
+                    setGenMode(e.target.value as GenMode);
+                    setGenBlocked(null);
+                  }}
+                  disabled={generating}
+                >
+                  {GEN_MODES.map((m) => (
+                    <option key={m} value={m}>
+                      {GEN_MODE_LABEL[m]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="info-note">
+                Auto-generate runs the scheduling engine for this week and leaves it in DRAFT. Assign Destinado puts
+                each dako&apos;s Destinado in SUGO with its Katuwang in RESERBA; Assign Katuwang puts the Katuwang in
+                SUGO with the Destinado in RESERBA (additional Katuwang rotate fairly into RESERBA II). Weekly
+                Availability must be encoded for this week first — generation is blocked until it is. Manual encoding
+                stays available per cell (Delegate/Override).
+              </p>
+              {genBlocked ? (
+                <div className="block-notice" role="alert">
+                  <strong>Weekly Availability Required</strong>
+                  <p>{genBlocked.message}</p>
+                  {/* Update #24 — land in “fix availability” mode: the missing
+                      teachers are highlighted and can be filled in one click. */}
+                  <a
+                    className="btn btn-secondary"
+                    href={`/availability?year=${weekYear}&week=${weekNumber}&fix=1`}
+                  >
+                    Go to Weekly Availability
+                  </a>
+                </div>
+              ) : null}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setShowGenModal(false);
+                    setGenBlocked(null);
+                  }}
+                  disabled={generating}
+                >
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" onClick={confirmGenerate} disabled={generating}>
+                  {generating ? "Working…" : "Confirm"}
                 </button>
               </div>
             </div>

@@ -27,7 +27,10 @@ export function isTeacherEligibleForDako(
  *    ENGLISH dako is never allowed; the only path to eligibility is editing
  *    the teacher's language to ENGLISH in their Phase 2 profile.
  */
-export const NON_OVERRIDEABLE_RULES = ["DAKO_DISABLED", "LANGUAGE_MISMATCH"] as const;
+// Update #5 — OATH_DATE_NOT_REACHED is ABSOLUTE (user-decided): a teacher must
+// never receive a NEW assignment dated before their Panunumpa/oath-taking date,
+// and no actor (ADMIN included) and no reason may bypass it.
+export const NON_OVERRIDEABLE_RULES = ["DAKO_DISABLED", "LANGUAGE_MISMATCH", "OATH_DATE_NOT_REACHED"] as const;
 
 export function isNonOverrideableRule(rule: string): boolean {
   return (NON_OVERRIDEABLE_RULES as readonly string[]).includes(rule);

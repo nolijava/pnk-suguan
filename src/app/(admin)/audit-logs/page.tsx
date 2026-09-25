@@ -1,4 +1,4 @@
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { listAuditLogs } from "@/server/services/audit.service";
 import { FilterForm, Pagination } from "@/app/(admin)/_components";
 

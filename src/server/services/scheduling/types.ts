@@ -24,6 +24,7 @@ export type HardRuleCode =
   | "NOT_ENCODED"
   | "LANGUAGE_MISMATCH"
   | "PREVIOUS_WEEK_ABSENT"
+  | "OATH_DATE_NOT_REACHED"
   | "ALREADY_ASSIGNED_THIS_WEEK";
 
 /** One teacher in the candidate pool (plain JSON-safe shape). */
@@ -35,6 +36,11 @@ export interface CandidateTeacher {
   /** Master status (ACTIVE/INACTIVE) — authoritative over weekly state (§14). */
   status: string;
   currentDestinationId: string | null;
+  /** Update #5 — Panunumpa/oath-taking date (YYYY-MM-DD); null = unrestricted. */
+  dateOfOath: string | null;
+  /** Guro Duty — 'DESTINADO' | 'KATUWANG'; null/absent = no duty recorded
+   *  (excluded from the duty-based generation modes; never inferred). */
+  duty?: "DESTINADO" | "KATUWANG" | null;
 }
 
 /** One Dako to be scheduled. */
@@ -44,6 +50,8 @@ export interface ScheduleDako {
   dakoName: string;
   language: "FILIPINO" | "ENGLISH";
   status: string;
+  /** Update #6 — Priority Dako (RESERBA / RESERBA II passes allocate first). */
+  isPriority: boolean;
 }
 
 /** Immutable per-week scheduling context built from ~6 set-based queries. */
@@ -52,6 +60,8 @@ export interface SchedulingContext {
   year: number;
   isoWeekNumber: number;
   weekStatus: string;
+  /** Update #5 — the week SERVICE date (Sunday, weeks.end_date) for oath compares. */
+  weekServiceDate: string;
   teachers: CandidateTeacher[];
   dakos: ScheduleDako[];
   /** Weekly availability by teacherId (status + reason). */

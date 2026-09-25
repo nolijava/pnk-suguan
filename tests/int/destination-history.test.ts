@@ -98,7 +98,7 @@ describe("E-3 — destination history (transactional, unique, preserved)", () =>
     expect(after.length).toBe(before.length);
   });
 
-  it("§9 destined-teacher change: assigning a new teacher closes the previous holder's period (never overlapping); one active per dako", async () => {
+  it("§9 destined-teacher change: assigning a new teacher closes the previous holder's period (never overlapping); one active per dako when no duty is recorded", async () => {
     const t1 = await mkTeacher("PNK-G-9912");
     const t2 = await mkTeacher("PNK-G-9913");
     const d = await mkDako("ILGD-9913");
@@ -107,6 +107,8 @@ describe("E-3 — destination history (transactional, unique, preserved)", () =>
     await assignDestination(t1.id, d.id, admin);
     // §9 — when the destined teacher changes, the previous record is closed
     // (end-dated, preserved) and the new one created — never two active.
+    // New Update #8 — duty-less periods share ONE slot (''), so the ORIGINAL
+    // one-active-per-dako rule is exactly what still applies here.
     await assignDestination(t2.id, d.id, admin);
     const t1Periods = await listForTeacher(t1.id);
     expect(t1Periods).toHaveLength(1);
@@ -195,5 +197,172 @@ describe("E-3 — destination history (transactional, unique, preserved)", () =>
       .where(eq(schema.auditLogs.action, "DESTINATION_CORRECTED"));
     expect(audits.filter((a) => a.entityId === periodId)).toHaveLength(1);
     await expect(correctPeriod(periodId, { startDate: "2099-07-01" }, "   ", admin)).rejects.toThrow(/reason/);
+  });
+
+  // -------------------------------------------------------------------------
+  // New Update #6/#7/#8 — duty as a property of the destination relationship
+  // -------------------------------------------------------------------------
+
+  it("duty travels WITH the period: a destination change preserves the duty held at the previous dako", async () => {
+    const t = await mkTeacher("PNK-G-9920");
+    const d1 = await mkDako("ILGD-9920");
+    const d2 = await mkDako("ILGD-9921");
+
+    const first = await assignDestination(t.id, d1.id, admin, { duty: "DESTINADO" });
+    expect(first.duty).toBe("DESTINADO");
+    const second = await assignDestination(t.id, d2.id, admin, { duty: "KATUWANG" });
+    expect(second.duty).toBe("KATUWANG");
+
+    const history = await listForTeacher(t.id);
+    expect(history).toHaveLength(2);
+    const closed = history.find((h) => h.id === first.periodId)!;
+    const open = history.find((h) => h.id === second.periodId)!;
+    expect(closed.endDate).not.toBeNull();
+    expect(closed.duty).toBe("DESTINADO"); // historical duty preserved, never rewritten
+    expect(open.duty).toBe("KATUWANG");
+    expect(open.endDate).toBeNull();
+
+    // teachers.duty mirrors the OPEN relationship's duty (generation depends on it).
+    const teacherRow = (await db.select().from(schema.teachers).where(eq(schema.teachers.id, t.id)))[0]!;
+    expect(teacherRow.currentDestinationId).toBe(d2.id);
+    expect(teacherRow.duty).toBe("KATUWANG");
+
+    // The audit trail carries the duty on both sides of the change.
+    const audits = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, "DESTINATION_ASSIGNED"));
+    const mine = audits.filter((a) => a.entityId === t.id);
+    expect(mine).toHaveLength(2);
+    expect((mine[1]!.newValue as { duty: string }).duty).toBe("KATUWANG");
+  });
+
+  it("one active holder per (dako, duty): a Destinado and a Katuwang coexist; a second Destinado replaces the first", async () => {
+    const t1 = await mkTeacher("PNK-G-9921");
+    const t2 = await mkTeacher("PNK-G-9922");
+    const t3 = await mkTeacher("PNK-G-9923");
+    const d = await mkDako("ILGD-9922");
+
+    await assignDestination(t1.id, d.id, admin, { duty: "DESTINADO" });
+    await assignDestination(t2.id, d.id, admin, { duty: "KATUWANG" });
+
+    let view = await listForDako(d.id);
+    expect(view.filter((p) => p.endDate === null)).toHaveLength(2); // both slots held
+    expect(view.find((p) => p.duty === "DESTINADO")!.teacherId).toBe(t1.id);
+    expect(view.find((p) => p.duty === "KATUWANG")!.teacherId).toBe(t2.id);
+
+    // A second Destinado replaces the first — the Katuwang slot is untouched.
+    await assignDestination(t3.id, d.id, admin, { duty: "DESTINADO" });
+    view = await listForDako(d.id);
+    const active = view.filter((p) => p.endDate === null);
+    expect(active).toHaveLength(2);
+    expect(active.find((p) => p.duty === "DESTINADO")!.teacherId).toBe(t3.id);
+    expect(active.find((p) => p.duty === "KATUWANG")!.teacherId).toBe(t2.id);
+    // The replaced Destinado is end-dated, never deleted.
+    expect(view.find((p) => p.teacherId === t1.id)!.endDate).not.toBeNull();
+  });
+
+  it("a duty-bearing assignment also supersedes an UNLABELLED active period at the same dako", async () => {
+    const t1 = await mkTeacher("PNK-G-9924");
+    const t2 = await mkTeacher("PNK-G-9925");
+    const d = await mkDako("ILGD-9923");
+
+    await assignDestination(t1.id, d.id, admin); // legacy-style: no duty recorded
+    await assignDestination(t2.id, d.id, admin, { duty: "KATUWANG" });
+
+    const view = await listForDako(d.id);
+    expect(view.filter((p) => p.endDate === null)).toHaveLength(1);
+    expect(view.find((p) => !p.endDate)!.teacherId).toBe(t2.id);
+    expect((await listForTeacher(t1.id))[0]!.endDate).not.toBeNull();
+  });
+
+  it("a duty-only change at the SAME dako updates the open period in place (no churn) and mirrors teachers.duty", async () => {
+    const t = await mkTeacher("PNK-G-9926");
+    const d = await mkDako("ILGD-9924");
+    const first = await assignDestination(t.id, d.id, admin, { duty: "DESTINADO" });
+
+    const again = await assignDestination(t.id, d.id, admin, { duty: "KATUWANG" });
+    expect(again.periodId).toBe(first.periodId);
+    const history = await listForTeacher(t.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]!.duty).toBe("KATUWANG");
+    expect(history[0]!.startDate).toBe(first.startDate);
+    const teacherRow = (await db.select().from(schema.teachers).where(eq(schema.teachers.id, t.id)))[0]!;
+    expect(teacherRow.duty).toBe("KATUWANG");
+
+    // An identical re-assign is still a true no-op (no audit noise).
+    const before = (await db.select().from(schema.auditLogs)).length;
+    await assignDestination(t.id, d.id, admin, { duty: "KATUWANG" });
+    expect((await db.select().from(schema.auditLogs)).length).toBe(before);
+  });
+
+  it("only DESTINADO | KATUWANG are ever stored; a nonsense duty is rejected", async () => {
+    const t = await mkTeacher("PNK-G-9927");
+    const d = await mkDako("ILGD-9925");
+    await expect(
+      assignDestination(t.id, d.id, admin, { duty: "PRESIDENT" as never }),
+    ).rejects.toThrow(/duty/);
+    expect(await listForTeacher(t.id)).toHaveLength(0);
+  });
+
+  it("changeCurrentDestination requires a duty to SET a destination and stores it on the period", async () => {
+    const { changeCurrentDestination } = await import("@/server/services/teacher.service");
+    const t = await mkTeacher("PNK-G-9928");
+    const d = await mkDako("ILGD-9926");
+
+    // No duty → the rule is enforced server-side (never by hiding a control).
+    await expect(changeCurrentDestination(t.id, d.id, "first posting", admin)).rejects.toThrow(/duty/);
+    expect(await listForTeacher(t.id)).toHaveLength(0);
+
+    const result = await changeCurrentDestination(t.id, d.id, "first posting", admin, "DESTINADO");
+    expect(result.teacher.currentDestinationId).toBe(d.id);
+    expect(result.teacher.duty).toBe("DESTINADO");
+    const open = (await listForTeacher(t.id)).find((p) => !p.endDate)!;
+    expect(open.duty).toBe("DESTINADO");
+
+    // Clearing needs no duty and preserves the period (with its duty) in history.
+    await changeCurrentDestination(t.id, null, "relocated away", admin);
+    expect(await listForTeacher(t.id)).toHaveLength(1);
+    expect((await listForTeacher(t.id))[0]!.duty).toBe("DESTINADO");
+  });
+
+  it("a master-data duty edit keeps the OPEN period aligned (one source of truth)", async () => {
+    const { updateTeacher } = await import("@/server/services/teacher.service");
+    const t = await mkTeacher("PNK-G-9929");
+    const d = await mkDako("ILGD-9927");
+    await assignDestination(t.id, d.id, admin, { duty: "DESTINADO" });
+
+    await updateTeacher(t.id, { duty: "KATUWANG" }, admin);
+    const open = (await listForTeacher(t.id)).find((p) => !p.endDate)!;
+    expect(open.duty).toBe("KATUWANG");
+    const teacherRow = (await db.select().from(schema.teachers).where(eq(schema.teachers.id, t.id)))[0]!;
+    expect(teacherRow.duty).toBe("KATUWANG");
+  });
+
+  it("correctPeriod can fix a recorded duty — with a reason — and rejects an invalid one", async () => {
+    const t = await mkTeacher("PNK-G-9930");
+    const d = await mkDako("ILGD-9928");
+    const { periodId } = await assignDestination(t.id, d.id, admin, { duty: "DESTINADO" });
+
+    const fixed = await correctPeriod(periodId, { duty: "KATUWANG" }, "duty was recorded the wrong way round", admin);
+    expect(fixed.duty).toBe("KATUWANG");
+    await expect(correctPeriod(periodId, { duty: "SENATOR" as never }, "typo", admin)).rejects.toThrow(/duty/);
+  });
+
+  it("the widened slot rule is enforced by the DATABASE, not only by the service", async () => {
+    const t1 = await mkTeacher("PNK-G-9931");
+    const t2 = await mkTeacher("PNK-G-9932");
+    const d = await mkDako("ILGD-9929");
+    await assignDestination(t1.id, d.id, admin, { duty: "DESTINADO" });
+
+    // A second OPEN Destinado for the same dako cannot be inserted directly.        
+    await expect(
+      db.insert(schema.destinationHistory).values({
+        teacherId: t2.id,
+        dakoId: d.id,
+        startDate: "2099-01-01",
+        duty: "DESTINADO",
+      }),
+    ).rejects.toThrow();
+    // …while the OTHER slot is free by design.
+    await assignDestination(t2.id, d.id, admin, { duty: "KATUWANG" });
+    expect((await listForDako(d.id)).filter((p) => !p.endDate)).toHaveLength(2);
   });
 });

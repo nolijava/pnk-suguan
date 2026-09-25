@@ -6,6 +6,12 @@ node_modules/
 out/
 next-env.d.ts
 
+# playwright smoke suite (isolated dev-server build dir, artifacts, session)
+.next-e2e/
+playwright-report/
+test-results/
+e2e/.auth/
+
 # L3 packaged Windows build (build artifact, rebuilt via `npm run package:win`)
 dist/
 
@@ -18,6 +24,10 @@ release/**/*.exe
 
 # portable toolchain (Node.js) — machine-local, not part of the repo
 .tools/
+
+# logo generator scratch render (`npm run logo`) — the SHIPPED logo is the
+# hand-supplied artwork in public/logo/, which the generator never writes to
+logo-render/
 
 # embedded postgres binaries and data directories
 .pg/

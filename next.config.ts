@@ -34,6 +34,19 @@ export function securityHeadersFor(dev: boolean): Array<{ key: string; value: st
 const SECURITY_HEADERS = securityHeadersFor(isDev);
 
 const nextConfig: NextConfig = {
+  // E2E isolation: the Playwright suite runs its own `next dev` beside the
+  // developer's server — two servers sharing one .next corrupt each other
+  // (a `next build` clobbering a running dev server is the same failure mode).
+  // PNK_DIST_DIR is set only by playwright.config.ts (.next-e2e); every normal
+  // run is untouched and keeps .next.
+  distDir: process.env.PNK_DIST_DIR ?? ".next",
+  // Dev-only: when the page is opened through a bare loopback host (embedded
+  // preview frames request dev resources "from 127.0.0.1"), Next's dev-origin
+  // protection 403s /_next/hmr and the devtools fonts. The refused HMR socket
+  // keeps the dev client from bootstrapping React at all — every client control
+  // (mobile nav drawer, modals, toggles) went dead while plain <a> links still
+  // worked. Loopback hosts only; ignored in production builds.
+  allowedDevOrigins: ["127.0.0.1", "localhost", "[::1]"],
   // L3 — local Windows packaging. `standalone` emits a self-contained server
   // tree (.next/standalone) with only the traced runtime dependencies, so the
   // package can ship its own Node runtime instead of requiring one on PATH.

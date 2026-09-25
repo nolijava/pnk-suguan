@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { HistoricalService, DakoService, TeacherService } from "@/server/services";
 import { hasPermission } from "@/server/auth/permissions";
 import { StateCard } from "../_components/state-card";
@@ -7,6 +7,7 @@ import { HistoricalClient, type HistoricalRowExisting } from "./historical-clien
 import { getDb } from "@/server/db/client";
 import { assignments, dako, teachers } from "@/server/db/schema";
 import { and, eq } from "drizzle-orm";
+import { formatFullName } from "@/lib/name";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ export default async function HistoricalPage({
   const dakos = dakoList.rows.map((d) => ({ id: d.id, name: d.name, language: d.language, status: d.status }));
   const teachersList = teacherList.rows.map((t) => ({
     id: t.id,
-    fullName: [t.firstName, t.middleName, t.lastName].filter(Boolean).join(" "),
+    fullName: formatFullName(t),
     teacherCode: t.teacherCode,
     language: t.language,
     status: t.status,
@@ -55,6 +56,7 @@ export default async function HistoricalPage({
         firstName: teachers.firstName,
         middleName: teachers.middleName,
         lastName: teachers.lastName,
+        suffix: teachers.suffix,
         assignmentType: assignments.assignmentType,
       })
       .from(assignments)
@@ -66,7 +68,7 @@ export default async function HistoricalPage({
       dakoId: r.dakoId,
       dakoName: r.dakoName,
       teacherId: r.teacherId,
-      teacherName: [r.firstName, r.middleName, r.lastName].filter(Boolean).join(" "),
+      teacherName: formatFullName(r),
       teacherCode: r.teacherCode,
       assignmentType: r.assignmentType,
     }));

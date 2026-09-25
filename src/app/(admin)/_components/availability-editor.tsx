@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { StatusBadge } from "./status-badge";
 import { Modal } from "./modal";
 
@@ -17,6 +19,8 @@ export interface EditorRow {
   effectiveStatus: string;
   currentDestinationName: string | null;
   currentDestinationStatus: string | null;
+  /** Update #14 — real assignment label(s) for this week ("Not Assigned" when none). */
+  assignedAs: string;
 }
 
 export interface AvailabilityEditorProps {
@@ -31,6 +35,17 @@ export interface AvailabilityEditorProps {
   /** ADMIN holding the active correction → may end it. */
   canEndCorrection: boolean;
   fillBlankCount: number;
+  /**
+   * Update #24 — the opt-in “Fix availability” guide, reached from a BLOCKED
+   * week (matrix mark or generation block notice via `?fix=1`). It adds the
+   * blocking sentence and highlights the teachers still needing availability;
+   * it never widens what may be written.
+   */
+  fixRequested?: boolean;
+  /** The generation gate's own blocking sentence (identical wording). */
+  readinessMessage?: string | null;
+  /** “Show only the missing” link (the NOT_ENCODED filter for this week). */
+  missingFilterHref?: string;
 }
 
 type Draft = { status: string | null; reason: string };
@@ -54,18 +69,43 @@ export function AvailabilityEditor({
   canBeginCorrection,
   canEndCorrection,
   fillBlankCount,
+  fixRequested = false,
+  readinessMessage = null,
+  missingFilterHref,
 }: AvailabilityEditorProps) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [showFillConfirm, setShowFillConfirm] = useState(false);
   const [showCorrection, setShowCorrection] = useState(false);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const editable = canEditNow;
   const dirty = useMemo(
     () => Object.entries(drafts).filter(([, d]) => d.status !== null || d.reason.trim() !== ""),
     [drafts],
   );
+
+  /**
+   * Update #24 — the teachers still blocking generation, i.e. exactly the set
+   * the gate reports missing and Fill Blanks targets: master-ACTIVE with no
+   * availability row for this week (effective status NOT_ENCODED). Master-
+   * INACTIVE teachers can never appear here (their effective status is
+   * INACTIVE_MASTER), so the highlight never points at an unusable row.
+   */
+  const needsAvailability = useMemo(
+    () =>
+      new Set(
+        rows
+          .filter((r) => r.masterStatus === "ACTIVE" && r.effectiveStatus === "NOT_ENCODED")
+          .map((r) => r.teacherId),
+      ),
+    [rows],
+  );
+  const showFixGuide = fixRequested && fillBlankCount > 0;
+  // Rows the CURRENT filters hide are still counted by the banner (the count is
+  // the server's), so say so rather than silently mislabelling the highlight.
+  const hiddenByFilters = Math.max(fillBlankCount - needsAvailability.size, 0);
 
   function setDraft(teacherId: string, patch: Partial<Draft>) {
     setDrafts((prev) => ({ ...prev, [teacherId]: { status: null, reason: "", ...prev[teacherId], ...patch } }));
@@ -102,8 +142,10 @@ export function AvailabilityEditor({
           const detail = body?.error?.issues?.[0]?.message ?? body?.error?.message ?? "save failed";
           setMessage({ kind: "error", text: detail });
         } else {
-          setMessage({ kind: "success", text: `Saved ${body.data.saved} change(s)${body.data.skipped ? `, ${body.data.skipped} unchanged skipped` : ""}. Reloading…` });
-          window.location.reload();
+          setMessage({ kind: "success", text: `Saved ${body.data.saved} change(s)${body.data.skipped ? `, ${body.data.skipped} unchanged skipped` : ""}.` });
+          setDrafts({});
+          // Update #14 — refresh the table in place (no full-page reload).
+          router.refresh();
         }
       } catch {
         setMessage({ kind: "error", text: "network error — changes not saved" });
@@ -124,8 +166,8 @@ export function AvailabilityEditor({
         if (!res.ok) {
           setMessage({ kind: "error", text: body?.error?.message ?? "fill blanks failed" });
         } else {
-          setMessage({ kind: "success", text: `Created ${body.data.created} AVAILABLE record(s). Reloading…` });
-          window.location.reload();
+          setMessage({ kind: "success", text: `Created ${body.data.created} AVAILABLE record(s).` });
+          router.refresh();
         }
       } catch {
         setMessage({ kind: "error", text: "network error — fill blanks not executed" });
@@ -182,6 +224,44 @@ export function AvailabilityEditor({
 
       {message ? <p className={message.kind === "success" ? "notice" : "error"}>{message.text}</p> : null}
 
+      {/* Update #24 — “Fix availability” guide. Shown only when this page was
+          opened from a BLOCKED week AND something is still missing, so it
+          disappears by itself once the gaps are filled. */}
+      {showFixGuide ? (
+        <div className="block-notice fix-availability" role="alert">
+          <strong>Weekly Availability Required</strong>
+          <p>
+            {readinessMessage ??
+              `${fillBlankCount} teacher(s) still have no availability for this week, so generation is blocked.`}
+          </p>
+          <p className="info-note">
+            {needsAvailability.size} highlighted row{needsAvailability.size === 1 ? "" : "s"} below
+            {needsAvailability.size === 1 ? " needs" : " need"} encoding
+            {hiddenByFilters > 0
+              ? `; ${hiddenByFilters} more ${hiddenByFilters === 1 ? "is" : "are"} hidden by the current filters.`
+              : "."}
+          </p>
+          <div className="block-notice-actions">
+            {editable && canWrite && fillBlankCount > 0 ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowFillConfirm(true)}
+                disabled={pending}
+              >
+                Fill {fillBlankCount} as AVAILABLE
+              </button>
+            ) : null}
+            {missingFilterHref ? (
+              <Link className="btn btn-secondary" href={missingFilterHref}>
+                Show only the missing
+              </Link>
+            ) : null}
+            <span className="info-note">…or encode each highlighted teacher below.</span>
+          </div>
+        </div>
+      ) : null}
+
       <div className="table-wrap">
         <table>
           <thead>
@@ -191,6 +271,7 @@ export function AvailabilityEditor({
               <th>Purok/Grupo</th>
               <th>Language</th>
               <th>Current Destination</th>
+              <th>Assigned</th>
               <th>Master Status</th>
               <th>Availability (this week)</th>
               <th>Reason / Remarks</th>
@@ -205,8 +286,16 @@ export function AvailabilityEditor({
               const shownStatus = d?.status ?? row.weeklyStatus;
               const shownReason = d ? d.reason : row.reason ?? "";
               const isAbsentNow = shownStatus === "ABSENT";
+              // Update #24 — highlight the rows still blocking generation. A row
+              // the operator is already editing wins the tint (row-dirty), so
+              // their in-progress work stays the most prominent thing.
+              const needsEncoding = fixRequested && needsAvailability.has(row.teacherId) && !d?.status;
+              const rowClass =
+                [locked ? "row-locked" : d?.status ? "row-dirty" : undefined, needsEncoding ? "row-needs-availability" : undefined]
+                  .filter(Boolean)
+                  .join(" ") || undefined;
               return (
-                <tr key={row.teacherId} className={locked ? "row-locked" : d?.status ? "row-dirty" : undefined}>
+                <tr key={row.teacherId} className={rowClass}>
                   <td>{row.teacherCode}</td>
                   <td>{row.fullName}</td>
                   <td>{row.purokGrupo ?? "—"}</td>
@@ -216,23 +305,28 @@ export function AvailabilityEditor({
                       ? `${row.currentDestinationName}${row.currentDestinationStatus === "DISABLED" ? " (DISABLED)" : ""}`
                       : "—"}
                   </td>
+                  {/* Update #14 — backend assignment data only; ABSENT/INACTIVE/NOT_ENCODED stay in their own columns. */}
+                  <td>{row.assignedAs}</td>
                   <td>
                     <StatusBadge status={row.masterStatus} />
                     {locked ? <span className="lock-note"> master-inactive — not schedulable</span> : null}
                   </td>
                   <td>
                     {rowEditable ? (
-                      <select
-                        aria-label={`Availability for ${row.teacherCode}`}
-                        value={shownStatus ?? ""}
-                        onChange={(e) => setDraft(row.teacherId, { status: e.target.value || null })}
-                        disabled={pending}
-                      >
-                        <option value="">— not encoded —</option>
-                        <option value="AVAILABLE">AVAILABLE</option>
-                        <option value="ABSENT">ABSENT</option>
-                        <option value="INACTIVE">INACTIVE</option>
-                      </select>
+                      <>
+                        <select
+                          aria-label={`Availability for ${row.teacherCode}`}
+                          value={shownStatus ?? ""}
+                          onChange={(e) => setDraft(row.teacherId, { status: e.target.value || null })}
+                          disabled={pending}
+                        >
+                          <option value="">— not encoded —</option>
+                          <option value="AVAILABLE">AVAILABLE</option>
+                          <option value="ABSENT">ABSENT</option>
+                          <option value="INACTIVE">INACTIVE</option>
+                        </select>
+                        {needsEncoding ? <span className="needs-availability-note">needs availability</span> : null}
+                      </>
                     ) : (
                       <span>{shownStatus ?? "—"}</span>
                     )}
@@ -261,7 +355,7 @@ export function AvailabilityEditor({
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="empty-state">No teachers match the current filters.</td>
+                <td colSpan={10} className="empty-state">No teachers match the current filters.</td>
               </tr>
             ) : null}
           </tbody>

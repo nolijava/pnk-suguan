@@ -89,6 +89,22 @@ export function rankedEligible(
 
 const TYPE_PRIORITY: AssignmentType[] = ["SUGO", "RESERBA", "RESERBA_II"];
 
+/**
+ * Update #6 — Priority-Dako processing order for one allocation pass.
+ * Priority dakos are attempted FIRST (their teachers come from the same shared
+ * pool, so they win the best candidates); remaining dakos follow in the
+ * existing deterministic dakoCode order. SUGO ordering is untouched. Priority
+ * is PRECEDENCE, never an alphabetical/sequential renumbering.
+ */
+export function passOrder(dakos: ScheduleDako[]): ScheduleDako[] {
+  return [...dakos].sort((a, b) => {
+    const pa = a.isPriority ? 0 : 1;
+    const pb = b.isPriority ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    return a.dakoCode.localeCompare(b.dakoCode);
+  });
+}
+
 function emptySlot(
   dako: ScheduleDako,
   type: AssignmentType,
@@ -200,15 +216,20 @@ export function allocate(ctx: SchedulingContext): AllocationPlan {
     return filledSlot(dako, type, best, ctx);
   };
 
-  // Pass 1+2: SUGO then RESERBA for every active Dako.
-  for (const type of ["SUGO", "RESERBA"] as AssignmentType[]) {
-    for (const dako of activeDakos) {
-      if (!isOccupied(dako.dakoId, type)) slots.push(tryFill(dako, type, remaining));
-    }
+  // Pass 1: SUGO for every active Dako (existing dakoCode order — untouched).
+  for (const dako of activeDakos) {
+    if (!isOccupied(dako.dakoId, "SUGO")) slots.push(tryFill(dako, "SUGO", remaining));
+  }
+
+  // Pass 2: RESERBA — Update #6: Priority Dako receive assignment priority
+  // first; remaining assignments follow the existing fair-rotation logic.
+  for (const dako of passOrder(activeDakos)) {
+    if (!isOccupied(dako.dakoId, "RESERBA")) slots.push(tryFill(dako, "RESERBA", remaining));
   }
 
   // Pass 3: RESERBA_II from the leftover pool ONLY (approved §9/§4 refinement).
-  for (const dako of activeDakos) {
+  // Update #6: Priority Dako receive the remaining RESERBA II teachers first.
+  for (const dako of passOrder(activeDakos)) {
     if (isOccupied(dako.dakoId, "RESERBA_II")) continue;
     if (remaining.size === 0) {
       slots.push(

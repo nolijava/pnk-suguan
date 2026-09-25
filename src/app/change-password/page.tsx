@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { requireUser } from "@/server/auth/guard";
+import { requirePageUser as requireUser } from "@/server/auth/guard";
 import { changePassword } from "@/server/auth/auth.service";
 import { SESSION_COOKIE } from "@/server/auth/session";
 import { checkPasswordStrength } from "@/lib/password-strength";
+import { BrandMark } from "@/app/_components/brand-mark";
 
 export default async function ChangePasswordPage({
   searchParams,
@@ -45,9 +46,7 @@ export default async function ChangePasswordPage({
     <main className="auth-shell">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="brand-mark" aria-hidden="true">
-            PNK
-          </span>
+          <BrandMark />
           <div>
             <h1>Change password</h1>
             <p className="auth-sub">Signed in as {user?.email}</p>

@@ -72,15 +72,23 @@ export function FilterForm({
   const applied = useRef<Record<string, string>>(fieldValues(values, fields));
   const [local, setLocal] = useState<Record<string, string>>(() => fieldValues(values, fields));
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastKey = useRef<string>(JSON.stringify(fieldValues(values, fields)));
+  const appliedKey = useRef<string>(JSON.stringify(fieldValues(values, fields)));
+  // Update #7 — TRUE while OUR OWN navigation (or debounce) is still in flight.
+  // Server `values` lag behind push(); without this guard an interim re-render
+  // (e.g. the next keystroke) sees a "changed" seed and wipes what was typed.
+  const inFlight = useRef(false);
 
-  // Re-seed whenever the server reports different applied values (Reset, a sort
-  // link, back/forward navigation) — but never while the user is mid-typing.
+  // Re-seed only on a genuine EXTERNAL change (Reset, a sort link, back/forward):
+  // never while our own push is in flight or a keystroke debounce is armed.
   const seed = fieldValues(values, fields);
   const seedKey = JSON.stringify(seed);
   useEffect(() => {
-    if (seedKey === lastKey.current) return;
-    lastKey.current = seedKey;
+    if (seedKey === appliedKey.current) {
+      inFlight.current = false; // our navigation landed — values acknowledged
+      return;
+    }
+    if (inFlight.current || timer.current !== null) return; // stale props mid-push
+    appliedKey.current = seedKey;
     applied.current = seed;
     setLocal(seed);
   }, [seedKey, seed]);
@@ -103,8 +111,10 @@ export function FilterForm({
   }
 
   function push(next: Record<string, string>) {
+    timer.current = null; // debounce is spent; it must not block the ack re-seed
     applied.current = next;
-    lastKey.current = JSON.stringify(fieldValues(next as Record<string, string | undefined>, fields));
+    appliedKey.current = JSON.stringify(fieldValues(next as Record<string, string | undefined>, fields));
+    inFlight.current = true;
     startTransition(() => router.replace(buildUrl(next), { scroll: false }));
   }
 

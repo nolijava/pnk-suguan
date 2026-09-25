@@ -187,6 +187,13 @@ async function violatedRulesFor(
   else if (avail.status === "INACTIVE") violated.push("WEEKLY_INACTIVE");
   else if (avail.status !== "AVAILABLE") violated.push("NOT_ENCODED");
 
+  // Update #5 — no NEW assignment before the Panunumpa/oath-taking date.
+  // Calendar-date compare: the week SERVICE date (Sunday) must be >= dateOfOath.
+  // NON-overridable (see NON_OVERRIDEABLE_RULES) — rejects every actor.
+  if (tRow.dateOfOath !== null && wRow.endDate < tRow.dateOfOath) {
+    violated.push("OATH_DATE_NOT_REACHED");
+  }
+
   // Previous-week ABSENT — hard for the engine; overrideable by ADMIN (§5/§15).
   const prevAbsent = await wasAbsentPreviousWeekBatch(weekId);
   if (prevAbsent.has(teacherId)) violated.push("PREVIOUS_WEEK_ABSENT");
@@ -680,7 +687,8 @@ export async function listAssignmentsForYear(year: number) {
       status: assignments.status,
       teacherId: assignments.teacherId,
       teacherCode: teachers.teacherCode,
-      teacherName: sql<string>`trim(concat(${teachers.firstName}, ' ', coalesce(${teachers.middleName}, ''), ' ', ${teachers.lastName}))`,
+      // Update #12 — dashboard shows first + last + suffix (middle name hidden).
+      teacherName: sql<string>`trim(concat(${teachers.firstName}, ' ', ${teachers.lastName}, coalesce(', ' || nullif(trim(${teachers.suffix}), ''), '')))`,
     })
     .from(assignments)
     .innerJoin(weeks, eq(weeks.id, assignments.weekId))
@@ -710,7 +718,8 @@ export async function listAssignmentsForWeek(weekId: string) {
       dakoId: assignments.dakoId,
       dakoName: dako.name,
       teacherId: assignments.teacherId,
-      teacherName: sql<string>`concat(${teachers.firstName}, ' ', ${teachers.lastName})`,
+      // Update #3 — full name with suffix: 'Juan Dela Cruz, Jr.' (presentation only).
+      teacherName: sql<string>`concat_ws(' ', ${teachers.firstName}, ${teachers.middleName}, ${teachers.lastName}) || coalesce(', ' || nullif(trim(${teachers.suffix}), ''), '')`,
       assignmentType: assignments.assignmentType,
       status: assignments.status,
       isOverride: assignments.isOverride,
@@ -909,7 +918,7 @@ export async function getAnnualCellInfo(year: number) {
     const tRows = await getDb()
       .select({
         id: teachers.id,
-        fullName: sql<string>`trim(concat(${teachers.firstName}, ' ', coalesce(${teachers.middleName}, ''), ' ', ${teachers.lastName}))`,
+        fullName: sql<string>`trim(concat(${teachers.firstName}, ' ', ${teachers.lastName}, coalesce(', ' || nullif(trim(${teachers.suffix}), ''), '')))`,
       })
       .from(teachers)
       .where(inArray(teachers.id, teacherIds));

@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { SchedulingService, WeekService } from "@/server/services";
 import { isoWeek, isoWeeksInYear } from "@/lib/iso-week";
 import { StatusBadge } from "../_components/status-badge";
 import { StateCard } from "../_components/state-card";
 import { hasPermission as hasPerm } from "@/server/auth/permissions";
 import { ScheduleActions, type SlotRow } from "./schedule-actions";
+import { formatFullName } from "@/lib/name";
 
 export const dynamic = "force-dynamic";
 
@@ -91,12 +92,20 @@ export default async function SchedulePage({
       dakoName: s.dakoName,
       dakoCode: s.dakoCode,
       assignmentType: s.assignmentType,
-      teacherName: existing ? assignmentTeacherName(assignments, existing) : s.fullName,
-      teacherCode: existing ? existing.teacherCode : s.teacherCode,
+      // Plan suggestions must never render as assignments: without a DB row
+      // the teacher columns stay empty (UNASSIGNED) and the engine's proposal
+      // is surfaced in the reason column as an explicit PLANNED note.
+      teacherName: existing ? assignmentTeacherName(assignments, existing) : null,
+      teacherCode: existing ? existing.teacherCode : null,
       source: existing ? existing.assignmentSource : null,
       status: existing ? existing.status : null,
       reasonCode: existing ? null : s.reasonCode,
-      reason: existing ? null : s.reason,
+      reason: existing
+        ? null
+        : s.reason ??
+          (s.fullName
+            ? `PLANNED — engine suggests ${s.fullName}${s.teacherCode ? ` (${s.teacherCode})` : ""} on regeneration; not assigned yet`
+            : null),
       occupiedByManual: existing ? existing.assignmentSource !== "AUTO" : false,
     });
   }
@@ -203,6 +212,7 @@ async function listAssignments(weekId: string) {
       firstName: teachers.firstName,
       middleName: teachers.middleName,
       lastName: teachers.lastName,
+      suffix: teachers.suffix,
     })
     .from(assignments)
     .innerJoin(dako, eq(dako.id, assignments.dakoId))
@@ -216,7 +226,7 @@ type AssignmentRow = Awaited<ReturnType<typeof listAssignments>>[number];
 
 function assignmentTeacherName(
   rows: AssignmentRow[],
-  a: Pick<AssignmentRow, "firstName" | "middleName" | "lastName">,
+  a: Pick<AssignmentRow, "firstName" | "middleName" | "lastName" | "suffix">,
 ): string {
-  return [a.firstName, a.middleName, a.lastName].filter(Boolean).join(" ");
+  return formatFullName(a);
 }

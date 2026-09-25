@@ -14,6 +14,9 @@ export const teachers = pgTable(
     birthday: date("birthday"),
     purokGrupo: text("purok_grupo"),
     dateOfOath: date("date_of_oath"),
+    // Guro Duty — 'DESTINADO' | 'KATUWANG'; NULL for legacy rows (duty cannot
+    // be inferred; duty-less teachers take no part in duty-based generation).
+    duty: text("duty"),
     currentDestinationId: uuid("current_destination_id").references(() => dako.id),
     language: text("language").notNull(),
     status: text("status").notNull().default("ACTIVE"),

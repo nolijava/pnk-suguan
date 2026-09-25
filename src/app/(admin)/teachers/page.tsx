@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { TeacherService, DakoService } from "@/server/services";
 import { calculateAge } from "@/lib/anniversary";
+import { formatFullName } from "@/lib/name";
 import { teacherQuerySchema } from "@/lib/validation/query-schemas";
 import { DataTable, StatusBadge, FilterForm, Pagination, ConfirmDialog } from "@/app/(admin)/_components";
 import type { Column } from "@/app/(admin)/_components";
@@ -70,7 +71,7 @@ export default async function TeachersPage({
       key: "name", header: "Full Name", sortKey: "name",
       render: (t) => (
         <span>
-          {[t.firstName, t.middleName, t.lastName].filter(Boolean).join(" ")}
+          {formatFullName(t)}
         </span>
       ),
     },

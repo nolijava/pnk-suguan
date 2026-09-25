@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { DakoService } from "@/server/services";
 import { dakoQuerySchema } from "@/lib/validation/query-schemas";
 import { DataTable, StatusBadge, FilterForm, Pagination, ConfirmDialog } from "@/app/(admin)/_components";
@@ -33,20 +33,17 @@ export default async function DakoPage({
   const notice = typeof sp.notice === "string" ? sp.notice : undefined;
   const error = typeof sp.error === "string" ? sp.error : undefined;
 
-  const [purokGroups, { rows, total, page, pageCount }] = await Promise.all([
-    DakoService.listDakoPurokGroups(),
-    DakoService.listDako({
-      search: query.q,
-      status: query.status,
-      language: query.language,
-      purokGrupo: query.purokGrupo,
-      worshipDay: query.worshipDay,
-      sort: query.sort,
-      order: query.order,
-      page: query.page,
-      pageSize: query.pageSize,
-    }),
-  ]);
+  const { rows, total, page, pageCount } = await DakoService.listDako({
+    search: query.q,
+    status: query.status,
+    language: query.language,
+    isPriority: query.isPriority,
+    worshipDay: query.worshipDay,
+    sort: query.sort,
+    order: query.order,
+    page: query.page,
+    pageSize: query.pageSize,
+  });
   const canWrite = user.roleCodes.includes("ADMIN") || user.roleCodes.includes("SCHEDULER");
 
   async function disableAction(formData: FormData) {
@@ -71,7 +68,7 @@ export default async function DakoPage({
     },
     { key: "name", header: "Dako Name", sortKey: "name", render: (d) => d.name },
     { key: "address", header: "Address", render: (d) => d.address },
-    { key: "purok", header: "Purok/Grupo", render: (d) => d.purokGrupo ?? "—" },
+    { key: "priority", header: "Priority", render: (d) => (d.isPriority ? "PRIORITY" : "—") },
     { key: "worship", header: "Worship", sortKey: "worshipDay", render: (d) => `${d.worshipDay} ${d.worshipTime}` },
     { key: "language", header: "Language", render: (d) => d.language },
     { key: "status", header: "Status", sortKey: "status", render: (d) => <StatusBadge status={d.status} /> },
@@ -111,7 +108,6 @@ export default async function DakoPage({
     q: query.q,
     status: query.status,
     language: query.language,
-    purokGrupo: query.purokGrupo,
     worshipDay: query.worshipDay,
     sort: query.sort,
     order: query.order,
@@ -136,9 +132,8 @@ export default async function DakoPage({
       <FilterForm
         action="/dako"
         fields={[
-          { kind: "search", name: "q", placeholder: "Search code, name, address, or purok/grupo…" },
+          { kind: "search", name: "q", placeholder: "Search code, name, or address…" },
           ...DAKO_FILTERS,
-          { name: "purokGrupo", label: "Purok/Grupo", options: purokGroups.map((p) => ({ value: p, label: p })) },
           { name: "worshipDay", label: "Worship Day", options: DAY_OPTIONS },
         ]}
         values={baseSearch}
@@ -155,7 +150,7 @@ export default async function DakoPage({
         sort={query.sort}
         order={query.order}
         baseSearch={baseSearch}
-        emptyMessage={query.q || query.status || query.language || query.purokGrupo || query.worshipDay ? "No dako match your filters." : "No dako yet. Add the first dako to get started."}
+        emptyMessage={query.q || query.status || query.language || query.isPriority || query.worshipDay ? "No dako match your filters." : "No dako yet. Add the first dako to get started."}
       />
 
       <Pagination page={page} pageCount={pageCount} total={total} baseSearch={baseSearch} basePath="/dako" />

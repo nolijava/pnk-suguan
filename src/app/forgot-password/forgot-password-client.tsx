@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { checkPasswordStrength } from "@/lib/password-strength";
+import { BrandMark } from "@/app/_components/brand-mark";
 
 type Step = "email" | "verify" | "reset" | "done";
 
@@ -139,9 +140,7 @@ export function ForgotPasswordClient() {
     <main className="auth-shell">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="brand-mark" aria-hidden="true">
-            PNK
-          </span>
+          <BrandMark />
           <div>
             <h1>Account recovery</h1>
             <p className="auth-sub">

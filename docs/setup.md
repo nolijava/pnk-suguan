@@ -148,3 +148,61 @@ The script is **scoped**: it refuses any account that does not hold the SUPER_AD
 > manager immediately, and prefer rotating again after first login since it transited a terminal.
 > The script intentionally accepts no password argument, so an operator never chooses (or leaves
 > in shell history) another person's final password.
+
+## Password-reset email (SMTP) — required for "Forgot password"
+
+The self-service recovery flow (Forgot password → 6-digit code by e-mail → verify → set a new password)
+**cannot deliver anything until SMTP is configured on the machine running the application**. Without
+it, the request is still accepted and answered with the same generic message (deliberately — the
+endpoint must not reveal whether an account exists), the code is generated, hashed and stored, and the
+send fails closed, so nothing arrives and no error is shown to the user.
+
+**Where the settings live**
+
+| Environment | File |
+|---|---|
+| Packaged install | the data folder's `.env` (`%LOCALAPPDATA%\PNK Suguan\.env` by default) |
+| This repository (development) | `.env.local` |
+
+The launcher forwards these keys from the data folder to the app; the app never stores them in the
+database, and no value is ever logged, echoed, or returned by an API. Change them only with a text
+editor that does not add a BOM, keep the file user-scoped, and never copy it.
+
+**Keys**
+
+```ini
+# Either a single connection URL…
+PNK_SMTP_URL=smtps://user:password@smtp.example.com:465
+# …or discrete settings
+PNK_SMTP_HOST=smtp.example.com
+PNK_SMTP_PORT=587
+PNK_SMTP_SECURE=false          # true for implicit TLS (typically port 465)
+PNK_SMTP_USER=<mailbox or provider user>
+PNK_SMTP_PASS=<provider app password — never an account password>
+PNK_SMTP_FROM="PNK Suguan <no-reply@example.com>"   # optional; defaults to PNK Suguan <no-reply@localhost>
+```
+
+**Procedure**
+
+1. Edit the file above and add the keys (URL form or discrete form — not both).
+2. **Restart the application** so the launcher passes the new values to the server.
+3. Sign in as ADMINISTRATOR or SUPER_ADMIN → **Settings → Email delivery**. The card must read
+   `CONFIGURED`.
+4. Press **Send test email to my account**. The outcome is audited (`EMAIL_TEST_SENT`) and shown
+   on the page. A success means the mail server accepted the message — if it does not arrive, check
+   the recipient's spam folder before changing anything.
+5. Complete a real recovery: sign out, use **Forgot password** with a real account address, and
+   confirm the code arrives, is single-use, and that the new password works.
+
+**Interpreting failures**
+
+| Symptom | Likely cause |
+|---|---|
+| Card reads `NOT CONFIGURED` | No `PNK_SMTP_*` key in the file, or the file is not the one the launcher reads |
+| Card reads `CONFIGURED` but the test fails | Wrong host/port/TLS mode, or a rejected mailbox/credential (many providers require an app password) |
+| Test succeeds, no message arrives | Recipient-side filtering; the system did deliver. Check spam/quarantine |
+| Test succeeds for one domain but not another | Sender-domain reputation or provider policy (`PNK_SMTP_FROM`) |
+
+Security behaviour is fixed and must not be weakened to make delivery work: codes are
+cryptographically random, stored only as a peppered HMAC, single-use, expire after 10 minutes, lock
+after five wrong attempts, rate-limited per account and per IP, and never logged or returned.

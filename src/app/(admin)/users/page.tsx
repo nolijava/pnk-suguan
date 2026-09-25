@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requirePermission, requireUser } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission, requirePageUser as requireUser } from "@/server/auth/guard";
 import { hasPermission } from "@/server/auth/permissions";
 import { UserManagementService } from "@/server/services";
 import { userListQuerySchema } from "@/lib/validation/schemas";

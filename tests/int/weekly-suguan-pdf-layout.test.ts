@@ -108,12 +108,12 @@ function vmOf(opts: {
     sectionD: {
       heading: "D. MGA MAGTUTURO SA KLASE",
       rows: [
-        { gampanin: "SUGO" },
-        { gampanin: "SUGO" },
-        { gampanin: "SUGO" },
-        { gampanin: "SUGO" },
-        { gampanin: "RESERBA" },
-        { gampanin: "RESERBA" },
+        { gampanin: "SUGO", pangalan: null },
+        { gampanin: "SUGO", pangalan: null },
+        { gampanin: "SUGO", pangalan: null },
+        { gampanin: "SUGO", pangalan: null },
+        { gampanin: "RESERBA", pangalan: null },
+        { gampanin: "RESERBA", pangalan: null },
       ],
     },
     signatories: [

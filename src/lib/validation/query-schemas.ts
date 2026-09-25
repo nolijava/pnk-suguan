@@ -4,6 +4,7 @@ import {
   dakoStatusSchema,
   languageSchema,
   assignmentTypeSchema,
+  dutySchema,
 } from "./schemas";
 
 const sortDir = z.enum(["asc", "desc"]);
@@ -25,13 +26,13 @@ export const teacherQuerySchema = z
   })
   .strict();
 
-/** §13 Dako list params — purokGrupo IS a dako filter. */
+/** §13 Dako list params (Update #4: purokGrupo removed from Dako). */
 export const dakoQuerySchema = z
   .object({
     q: z.string().max(200).optional(),
     status: dakoStatusSchema.optional(),
     language: languageSchema.optional(),
-    purokGrupo: z.string().max(100).optional(),
+    isPriority: z.coerce.boolean().optional(),
     worshipDay: z.enum(["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY","SUNDAY"]).optional(),
     sort: dakoSortSchema.optional(),
     order: sortDir.optional(),
@@ -40,11 +41,16 @@ export const dakoQuerySchema = z
   })
   .strict();
 
-/** §9/§12 Set/change/clear destination; reason mandatory in all cases. */
+/**
+ * §9/§12 Set/change/clear destination; reason mandatory in all cases.
+ * New Update #7 — `duty` is required when a destination is SET (the service
+ * enforces that cross-field rule) and is only ever DESTINADO | KATUWANG.
+ */
 export const currentDestinationChangeSchema = z
   .object({
     newDestinationId: z.string().uuid().nullable(),
     reason: z.string().min(1).max(500),
+    duty: dutySchema.nullable().optional(),
   })
   .strict();
 
@@ -52,6 +58,10 @@ export const currentDestinationChangeSchema = z
  * Phase 3 §10/§12 — weekly availability list params. The availability filter
  * includes NOT_ENCODED so unencoded teachers are explicitly identifiable.
  * NOTE: no purokGrupo — reference/display data only (never a teacher filter).
+ *
+ * This schema is STRICT and is shared by the JSON API (where a caller passing
+ * anything outside this set is a caller error). The availability PAGE must
+ * therefore forward only AVAILABILITY_FILTER_KEYS — see the note there.
  */
 export const availabilityFilterSchema = z.enum([
   "AVAILABLE",
@@ -71,8 +81,20 @@ export const availabilityQuerySchema = z
     currentDestinationId: z.string().uuid().optional(),
     sort: z.enum(["code", "name"]).optional(),
     order: sortDir.optional(),
+    /**
+     * Update #24 — "Fix availability" deep link from a BLOCKED week. It is
+     * deliberately a permissive string, not an enum or `z.coerce.boolean()`:
+     * this schema is `.strict()`, and the availability PAGE falls back to
+     * “no filters at all” when the parse fails — so a hand-typed `?fix=yes`
+     * must not silently drop the operator’s active filters. Only the exact
+     * values `1` / `true` turn the guide on (see FIX_PARAM_VALUES).
+     */
+    fix: z.string().max(16).optional(),
   })
   .strict();
+
+/** `?fix=` values that switch the availability page into the fix-availability guide. */
+export const FIX_PARAM_VALUES = ["1", "true"] as const;
 
 /**
  * Phase 3 §8b — ADMIN availability correction on a PUBLISHED week.
@@ -89,6 +111,30 @@ export const availabilityCorrectionSchema = z
       ctx.addIssue({ code: "custom", message: "reason is required to begin an availability correction" });
     }
   });
+
+/**
+ * The FILTER parameters `availabilityQuerySchema` accepts — every key except the
+ * page-owned `weekId`.
+ *
+ * The availability PAGE must forward ONLY these. That page also receives its own
+ * `year` / `week` (week navigation and the ISO-week jump form) and, after a
+ * redirect, `notice` / `error` — none of which the filter schema knows, and
+ * which the strict parse legitimately rejects. Because the page falls back to
+ * “no filters at all” when the parse fails, spreading the WHOLE query string in
+ * silently discarded every active filter (and with it the Update #24 guide).
+ */
+export const AVAILABILITY_FILTER_KEYS = [
+  "q",
+  "availability",
+  "masterStatus",
+  "language",
+  "currentDestinationId",
+  "sort",
+  "order",
+  "fix",
+] as const;
+
+export type AvailabilityFilterKey = (typeof AVAILABILITY_FILTER_KEYS)[number];
 
 export type TeacherQuery = z.infer<typeof teacherQuerySchema>;
 export type DakoQuery = z.infer<typeof dakoQuerySchema>;
@@ -233,6 +279,23 @@ export const weeklySuguanPdfQuerySchema = z
  */
 export const reasonQuerySchema = z.object({ reason: z.string().trim().min(1).max(500) }).strict();
 
+/**
+ * Update #22 — the Weekly Availability gate probe (`/api/scheduling/generation-gate`).
+ * The target week is addressed EITHER by `weekId` OR by `{year, week}`; `mode`
+ * carries the generation-method context into the audit row of a blocked attempt.
+ */
+export const generationGateQuerySchema = z
+  .object({
+    weekId: z.string().uuid().optional(),
+    year: z.coerce.number().int().min(1900).max(2999).optional(),
+    week: z.coerce.number().int().min(1).max(53).optional(),
+    mode: z.enum(["auto", "manual", "destinado", "katuwang"]).optional(),
+  })
+  .strict()
+  .refine((v) => v.weekId !== undefined || (v.year !== undefined && v.week !== undefined), {
+    message: "provide either weekId or year+week",
+  });
+
 export type WeekIdQuery = z.infer<typeof weekIdQuerySchema>;
 export type AssignmentCountsQuery = z.infer<typeof assignmentCountsQuerySchema>;
 export type AuditLogsQuery = z.infer<typeof auditLogsQuerySchema>;
@@ -240,3 +303,4 @@ export type WeeksQuery = z.infer<typeof weeksQuerySchema>;
 export type AnnualScheduleQuery = z.infer<typeof annualScheduleQuerySchema>;
 export type WeeklySuguanPdfQuery = z.infer<typeof weeklySuguanPdfQuerySchema>;
 export type ReasonQuery = z.infer<typeof reasonQuerySchema>;
+export type GenerationGateQuery = z.infer<typeof generationGateQuerySchema>;

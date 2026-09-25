@@ -29,9 +29,27 @@ const ui = localFont({
   variable: "--font-ui",
 });
 
+/**
+ * The system logo is also the browser icon. Every icon points at the same
+ * supplied artwork in public/logo/ (transparent SVG, its 64/256/512 PNG twins,
+ * and the multi-resolution .ico the installer and shortcuts use) — no separate
+ * favicon file to drift out of date. Browsers that understand SVG take the
+ * vector (crisp at any size); the PNGs and the .ico cover the rest, and the 512
+ * is offered as the iOS home-screen icon.
+ */
 export const metadata: Metadata = {
   title: "PNK Suguan System",
   description: "Teacher Assignment & Suguan Management System (development admin)",
+  icons: {
+    icon: [
+      { url: "/logo/pnk-suguan-logo.svg", type: "image/svg+xml" },
+      { url: "/logo/pnk-suguan.ico", type: "image/x-icon", sizes: "16x16 24x24 32x32 48x48 64x64 128x128 256x256" },
+      { url: "/logo/pnk-suguan-logo-64.png", type: "image/png", sizes: "64x64" },
+      { url: "/logo/pnk-suguan-logo-256.png", type: "image/png", sizes: "256x256" },
+    ],
+    shortcut: [{ url: "/logo/pnk-suguan.ico", type: "image/x-icon" }],
+    apple: [{ url: "/logo/pnk-suguan-logo-512.png", type: "image/png", sizes: "512x512" }],
+  },
 };
 
 /**

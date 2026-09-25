@@ -1,8 +1,12 @@
 import Link from "next/link";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { AvailabilityService, WeekService, DakoService } from "@/server/services";
 import { isoWeek, isoWeeksInYear } from "@/lib/iso-week";
-import { availabilityQuerySchema } from "@/lib/validation/query-schemas";
+import {
+  availabilityQuerySchema,
+  AVAILABILITY_FILTER_KEYS,
+  FIX_PARAM_VALUES,
+} from "@/lib/validation/query-schemas";
 import { StatusBadge } from "../_components/status-badge";
 import { FilterForm } from "../_components/filter-form";
 import { AvailabilityEditor, type EditorRow } from "../_components/availability-editor";
@@ -64,12 +68,28 @@ export default async function AvailabilityPage({
       : await WeekService.resolveWeek({ year, week: weekNum });
 
   // Filters — parsed with the strict schema; purokGrupo is intentionally absent.
-  const parsed = availabilityQuerySchema.safeParse({ ...flat, weekId: week.id });
+  // ONLY the filter parameters are forwarded: this page's own `year`/`week`
+  // (and the `notice`/`error` redirect flags) are not part of the schema, and
+  // the strict parse would otherwise fail on them, silently discarding EVERY
+  // active filter — the list would look unfiltered while the controls showed
+  // the filter as applied.
+  const filterParams: Record<string, string> = {};
+  for (const key of AVAILABILITY_FILTER_KEYS) {
+    const value = flat[key];
+    if (typeof value === "string") filterParams[key] = value;
+  }
+  const parsed = availabilityQuerySchema.safeParse({ ...filterParams, weekId: week.id });
   const q = parsed.success
     ? parsed.data
     : ({ weekId: week.id } as import("@/lib/validation/query-schemas").AvailabilityQuery);
 
-  const [list, correctionActive, correctionHolder, fillBlankCount, dakoList] = await Promise.all([
+  // Update #24 — the "Fix availability" guide is ON only for an explicit
+  // ?fix=1/true link (the blocked-week matrix marks and the generation block
+  // notices use it). It changes what the page EMPHASISES, never what it may
+  // write: the week lock, permissions and the bulk-save rules are untouched.
+  const fixRequested = q.fix !== undefined && (FIX_PARAM_VALUES as readonly string[]).includes(q.fix);
+
+  const [list, correctionActive, correctionHolder, fillBlankCount, dakoList, readiness] = await Promise.all([
     AvailabilityService.listWeeklyAvailability(week.id, {
       search: q.q,
       availability: q.availability,
@@ -83,6 +103,12 @@ export default async function AvailabilityPage({
     AvailabilityService.correctionGrantHolder(week.id),
     AvailabilityService.countFillBlankTargets(week.id),
     DakoService.listDako({ pageSize: 100 }),
+    // The SAME read-only readiness the generation gate computes, so the guide's
+    // sentence and counts are literally the ones blocking generation. Only
+    // fetched when the guide is on (the normal page path is unchanged).
+    fixRequested
+      ? AvailabilityService.getWeeklyAvailabilityReadiness({ weekId: week.id })
+      : Promise.resolve(null),
   ]);
 
   const canWrite = hasPermission(user.roleCodes, "availability.write");
@@ -106,6 +132,8 @@ export default async function AvailabilityPage({
     currentDestinationId: q.currentDestinationId,
     sort: q.sort,
     order: q.order,
+    // Week navigation keeps the guide up — the operator is mid-remediation.
+    fix: fixRequested ? "1" : undefined,
   };
   const filterLink = (over: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
@@ -167,7 +195,11 @@ export default async function AvailabilityPage({
       <FilterForm
         action="/availability"
         values={q as Record<string, string | undefined>}
-        preserve={{ year: String(week.year), week: String(week.isoWeekNumber) }}
+        preserve={{
+          year: String(week.year),
+          week: String(week.isoWeekNumber),
+          ...(fixRequested ? { fix: "1" } : {}),
+        }}
         resetHref={`/availability?year=${week.year}&week=${week.isoWeekNumber}`}
         fields={[
           { kind: "search", name: "q", placeholder: "Search teacher code or name…" },
@@ -213,6 +245,22 @@ export default async function AvailabilityPage({
         canBeginCorrection={canWrite && isSuperAdmin && week.status === "PUBLISHED" && !correctionActive}
         canEndCorrection={canWrite && isSuperAdmin && correctionActive && correctionHolder === user.userId}
         fillBlankCount={fillBlankCount}
+        /* Update #24 — “Fix availability” guide (opt-in via ?fix=1). The
+           sentence is the gate's own blocking text, so what this page says and
+           what generation enforces can never drift apart. */
+        fixRequested={fixRequested}
+        readinessMessage={readiness?.message ?? null}
+        missingFilterHref={
+          // `filterLink` carries the FILTERS, not the week — the week must be
+          // passed explicitly or the link would silently jump to today's week.
+          fixRequested
+            ? filterLink({
+                year: String(week.year),
+                week: String(week.isoWeekNumber),
+                availability: "NOT_ENCODED",
+              })
+            : undefined
+        }
       />
     </>
   );

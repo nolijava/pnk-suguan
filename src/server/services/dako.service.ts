@@ -119,7 +119,7 @@ export type DakoSortField = "code" | "name" | "worshipDay" | "dateEstablished" |
 export interface DakoListOptions {
   status?: "ACTIVE" | "DISABLED";
   language?: string;
-  purokGrupo?: string;
+  isPriority?: boolean;
   worshipDay?: string;
   search?: string;
   sort?: DakoSortField;
@@ -133,7 +133,7 @@ export interface DakoListRow {
   dakoCode: string;
   name: string;
   address: string;
-  purokGrupo: string | null;
+  isPriority: boolean;
   worshipDay: string;
   worshipTime: string;
   language: string;
@@ -148,7 +148,7 @@ export async function listDako(opts: DakoListOptions = {}): Promise<{ rows: Dako
   const conds = [];
   if (opts.status) conds.push(eq(dako.status, opts.status));
   if (opts.language) conds.push(eq(dako.language, opts.language));
-  if (opts.purokGrupo) conds.push(eq(dako.purokGrupo, opts.purokGrupo));
+  if (opts.isPriority !== undefined) conds.push(eq(dako.isPriority, opts.isPriority));
   if (opts.worshipDay) conds.push(eq(dako.worshipDay, opts.worshipDay));
   if (opts.search?.trim()) {
     const term = `%${opts.search.trim()}%`;
@@ -157,7 +157,6 @@ export async function listDako(opts: DakoListOptions = {}): Promise<{ rows: Dako
         ilike(dako.dakoCode, term),
         ilike(dako.name, term),
         ilike(dako.address, term),
-        ilike(dako.purokGrupo, term),
       ),
     );
   }
@@ -180,7 +179,7 @@ export async function listDako(opts: DakoListOptions = {}): Promise<{ rows: Dako
       dakoCode: dako.dakoCode,
       name: dako.name,
       address: dako.address,
-      purokGrupo: dako.purokGrupo,
+      isPriority: dako.isPriority,
       worshipDay: dako.worshipDay,
       worshipTime: dako.worshipTime,
       language: dako.language,
@@ -195,15 +194,6 @@ export async function listDako(opts: DakoListOptions = {}): Promise<{ rows: Dako
   const countRows = await getDb().select({ n: sql<number>`count(*)::int` }).from(dako).where(whereClause);
   const total = countRows[0]?.n ?? 0;
   return { rows, total, page, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
-}
-
-/** §13 filter dropdown source: distinct purok/grupo values across all dako. */
-export async function listDakoPurokGroups(): Promise<string[]> {
-  const rows = await getDb()
-    .selectDistinct({ purokGrupo: dako.purokGrupo })
-    .from(dako)
-    .orderBy(asc(dako.purokGrupo));
-  return rows.map((r) => r.purokGrupo).filter((p): p is string => p !== null && p !== "");
 }
 
 export interface DakoDetails {

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, date, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, date, index, boolean } from "drizzle-orm/pg-core";
 
 export const dako = pgTable(
   "dako",
@@ -8,7 +8,8 @@ export const dako = pgTable(
     name: text("name").notNull(),
     address: text("address").notNull(),
     dateEstablished: date("date_established").notNull(),
-    purokGrupo: text("purok_grupo"),
+    // Update #6 — Priority Dako (multi-select across dakos, never exclusive).
+    isPriority: boolean("is_priority").notNull().default(false),
     worshipDay: text("worship_day").notNull(),
     worshipTime: text("worship_time").notNull(),
     language: text("language").notNull(),
@@ -22,7 +23,7 @@ export const dako = pgTable(
   (t) => [
     index("dako_status_idx").on(t.status),
     index("dako_language_idx").on(t.language),
-    index("dako_purok_grupo_idx").on(t.purokGrupo),
+    index("dako_is_priority_idx").on(t.isPriority),
     index("dako_date_established_idx").on(t.dateEstablished),
   ],
 );

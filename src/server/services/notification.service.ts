@@ -138,6 +138,8 @@ export async function runDueAnniversaryScan(now: Date = new Date()): Promise<{
   scannedDakos: number;
   dueStages: number;
   createdNotifications: number;
+  /** Update #1/#2 — Guro birthday + grouped oath-anniversary notices. */
+  celebrations: Awaited<ReturnType<typeof import("./celebration.service").runDueCelebrationScan>>;
 }> {
   const due = await dueAnniversaryNotifications(now);
   let createdNotifications = 0;
@@ -145,5 +147,13 @@ export async function runDueAnniversaryScan(now: Date = new Date()): Promise<{
     const res = await recordDakoAnniversaryNotification(d.dakoId, d.anniversaryYear, d.stage);
     createdNotifications += res.notifications;
   }
-  return { scannedDakos: due.length, dueStages: due.length, createdNotifications };
+  // Update #1/#2 — same idempotent pattern for teacher celebrations.
+  const { runDueCelebrationScan } = await import("./celebration.service");
+  const celebrations = await runDueCelebrationScan(now);
+  return {
+    scannedDakos: due.length,
+    dueStages: due.length,
+    createdNotifications: createdNotifications + celebrations.createdNotifications,
+    celebrations,
+  };
 }

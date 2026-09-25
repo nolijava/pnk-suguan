@@ -39,7 +39,14 @@ export function evaluateCandidate(
   // D. Previous-week ABSENT → hard exclude from AUTOMATIC scheduling (§5.D).
   if (ctx.prevWeekAbsent.has(candidate.teacherId)) violated.push("PREVIOUS_WEEK_ABSENT");
 
-  // E. Language (§5.E): Filipino teacher → Filipino dako only.
+  // E. Update #5 — no NEW assignment before the Panunumpa/oath-taking date.
+  // Calendar-date compare (never timestamps): the week SERVICE date (Sunday)
+  // must be on/after dateOfOath. Non-overridable (lib/eligibility).
+  if (candidate.dateOfOath !== null && ctx.weekServiceDate < candidate.dateOfOath) {
+    violated.push("OATH_DATE_NOT_REACHED");
+  }
+
+  // F. Language (§5.E): Filipino teacher → Filipino dako only.
   if (!isTeacherEligibleForDako(candidate.language as Language, dako.language as Language)) {
     violated.push("LANGUAGE_MISMATCH");
   }

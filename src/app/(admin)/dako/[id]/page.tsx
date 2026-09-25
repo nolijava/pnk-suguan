@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/server/auth/guard";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { DakoService, AuditService, DestinationHistoryService } from "@/server/services";
 import { NotFoundError } from "@/lib/errors";
+import { dutyLabel } from "@/lib/duty";
 import { StatusBadge, ConfirmDialog, Notice, StateCard } from "@/app/(admin)/_components";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,13 @@ export default async function DakoDetailsPage({
   const canWrite = user.roleCodes.includes("ADMIN") || user.roleCodes.includes("SCHEDULER");
   const auditRows = await AuditService.listAuditLogs({ entityType: "dako", entityId: id, pageSize: 50 });
   const destinationHistory = await DestinationHistoryService.listForDako(id);
+
+  // New Update #8 — the SAME normalized destination-history rows the teacher
+  // pages read, grouped into the two duty slots. Nothing is derived from a
+  // second source, and a missing holder is an honest empty state.
+  const activeDestinado = destinationHistory.find((p) => !p.endDate && p.duty === "DESTINADO") ?? null;
+  const activeKatuwang = destinationHistory.find((p) => !p.endDate && p.duty === "KATUWANG") ?? null;
+  const activeUnlabelled = destinationHistory.filter((p) => !p.endDate && !p.duty);
 
   async function disableAction(formData: FormData) {
     "use server";
@@ -77,7 +85,7 @@ export default async function DakoDetailsPage({
             <dt>Dako Code</dt><dd>{d.dakoCode}</dd>
             <dt>Dako Name</dt><dd>{d.name}</dd>
             <dt>Address</dt><dd>{d.address}</dd>
-            <dt>Purok/Grupo</dt><dd>{d.purokGrupo ?? "—"}</dd>
+            <dt>Priority Dako</dt><dd>{d.isPriority ? "Yes" : "No"}</dd>
             <dt>Worship Day</dt><dd>{d.worshipDay}</dd>
             <dt>Worship Time</dt><dd>{d.worshipTime}</dd>
             <dt>Language</dt><dd>{d.language}</dd>
@@ -143,6 +151,56 @@ export default async function DakoDetailsPage({
         </section>
 
         <section className="card">
+          <h2>Current Assignment</h2>
+          <dl className="detail-list">
+            <dt>Destinado</dt>
+            <dd>
+              {activeDestinado ? (
+                <Link href={`/teachers/${activeDestinado.teacherId}`}>{activeDestinado.teacherName}</Link>
+              ) : (
+                <span className="info-note">No Destinado currently assigned.</span>
+              )}
+            </dd>
+            {activeDestinado ? (
+              <>
+                <dt>Destinado since</dt>
+                <dd>{activeDestinado.startDate}</dd>
+              </>
+            ) : null}
+            <dt>Katuwang</dt>
+            <dd>
+              {activeKatuwang ? (
+                <Link href={`/teachers/${activeKatuwang.teacherId}`}>{activeKatuwang.teacherName}</Link>
+              ) : (
+                <span className="info-note">No Katuwang currently assigned.</span>
+              )}
+            </dd>
+            {activeKatuwang ? (
+              <>
+                <dt>Katuwang since</dt>
+                <dd>{activeKatuwang.startDate}</dd>
+              </>
+            ) : null}
+          </dl>
+          {activeUnlabelled.length > 0 ? (
+            <p className="info-note">
+              {activeUnlabelled.length} currently destined teacher(s) with no recorded duty:{" "}
+              {activeUnlabelled.map((p, i) => (
+                <span key={p.id}>
+                  {i > 0 ? ", " : ""}
+                  <Link href={`/teachers/${p.teacherId}`}>{p.teacherName}</Link>
+                </span>
+              ))}
+              . Set the duty on their Current Destination to place them in a slot.
+            </p>
+          ) : null}
+          <p className="info-note">
+            One active Destinado and one active Katuwang at a time. Both slots read the same destination-history
+            records shown on the teacher pages, so the two views can never disagree.
+          </p>
+        </section>
+
+        <section className="card">
           <div className="section-head">
             <div>
               <span className="eyebrow">Paper &amp; Archive</span>
@@ -174,6 +232,11 @@ export default async function DakoDetailsPage({
                       <dt>Teacher</dt>
                       <dd>{p.teacherName}</dd>
                     </div>
+                    {/* New Update #8 — the duty recorded for THIS period. */}
+                    <div>
+                      <dt>Duty</dt>
+                      <dd>{dutyLabel(p.duty)}</dd>
+                    </div>
                     <div>
                       <dt>Date Destined</dt>
                       <dd>{p.startDate}</dd>
@@ -184,7 +247,7 @@ export default async function DakoDetailsPage({
                     </div>
                     <div>
                       <dt>Status</dt>
-                      <dd>{p.endDate ? "Ended" : "Active (current destined teacher)"}</dd>
+                      <dd>{p.endDate ? "Ended" : p.duty ? `Active (current ${dutyLabel(p.duty)})` : "Active (duty not recorded)"}</dd>
                     </div>
                   </dl>
                 </article>
@@ -192,8 +255,9 @@ export default async function DakoDetailsPage({
             </div>
           )}
           <p className="info-note">
-            The same normalized destination-history records shown on the teacher page — one active destined teacher at a
-            time; prior records preserved. Weekly Suguan assignments never create or modify these records.
+            The same normalized destination-history records shown on the teacher page — one active holder per duty slot
+            (Destinado, Katuwang); prior records are preserved together with the duty held there. Weekly Suguan
+            assignments never create or modify these records.
           </p>
         </section>
 

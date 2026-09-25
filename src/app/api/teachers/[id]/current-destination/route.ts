@@ -10,7 +10,13 @@ export async function POST(req: Request, { params }: Params) {
     const user = await requirePermission("teachers.write");
     const { id } = await params;
     const body = currentDestinationChangeSchema.parse(await parseBody(req));
-    const result = await TeacherService.changeCurrentDestination(id, body.newDestinationId, body.reason, user);
+    const result = await TeacherService.changeCurrentDestination(
+      id,
+      body.newDestinationId,
+      body.reason,
+      user,
+      body.duty ?? null,
+    );
     return ok(result);
   } catch (err) {
     return fail(err);

@@ -4,6 +4,7 @@ import { currentUserOrNull } from "@/server/auth/guard";
 import { login } from "@/server/auth/auth.service";
 import { SESSION_COOKIE } from "@/server/auth/session";
 import { cookies } from "next/headers";
+import { BrandMark } from "@/app/_components/brand-mark";
 
 export default async function LoginPage({
   searchParams,
@@ -40,9 +41,7 @@ export default async function LoginPage({
     <main className="auth-shell">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="brand-mark" aria-hidden="true">
-            PNK
-          </span>
+          <BrandMark />
           <div>
             <h1>PNK Suguan System</h1>
             <p className="auth-sub">Teacher Assignment &amp; Suguan Management</p>

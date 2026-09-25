@@ -69,6 +69,20 @@ export async function getWeek(id: string) {
   return rows[0];
 }
 
+/**
+ * Update #22 — READ-ONLY week lookup (never creates). The generation gate must
+ * be able to answer "is availability encoded for this ISO week?" without
+ * leaving a week row behind when the answer blocks the attempt.
+ */
+export async function findWeek(year: number, isoWeekNumber: number): Promise<typeof weeks.$inferSelect | null> {
+  const rows = await getDb()
+    .select()
+    .from(weeks)
+    .where(and(eq(weeks.year, year), eq(weeks.isoWeekNumber, isoWeekNumber)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function listWeeks(year?: number) {
   const q = getDb().select().from(weeks);
   return year ? q.where(eq(weeks.year, year)).orderBy(weeks.isoWeekNumber) : q.orderBy(weeks.year, weeks.isoWeekNumber);

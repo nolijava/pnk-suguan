@@ -1,11 +1,14 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/server/auth/guard";
+import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
+import { requirePagePermission as requirePermission } from "@/server/auth/guard";
 import { TeacherService, DakoService, AuditService, DestinationHistoryService } from "@/server/services";
 import { NotFoundError } from "@/lib/errors";
+import { formatFullName } from "@/lib/name";
+import { dutyLabel, isDutyCode } from "@/lib/duty";
 import { StatusBadge, ConfirmDialog, Notice, StateCard } from "@/app/(admin)/_components";
+import { DestinationFields } from "./destination-fields";
 
 export const dynamic = "force-dynamic";
 
@@ -59,15 +62,24 @@ export default async function TeacherDetailsPage({
     revalidatePath(`/teachers/${id}`);
     redirect(`/teachers/${id}?notice=${encodeURIComponent("Teacher reactivated.")}`);
   }
+  /**
+   * New Update #7 — the destination change now carries the DUTY held at the new
+   * destination (Destinado / Katuwang only). The service stores it on the
+   * destination period, mirrors it to the teacher row, preserves the previous
+   * destination (and its duty) in history, and audits the change; it also
+   * rejects a set without a duty, so the rule does not live in the UI.
+   */
   async function destinationAction(formData: FormData) {
     "use server";
     const actor = await requirePermission("teachers.write");
     const raw = String(formData.get("newDestinationId") ?? "").trim();
+    const dutyRaw = String(formData.get("duty") ?? "").trim();
     await TeacherService.changeCurrentDestination(
       String(formData.get("id")),
       raw === "" ? null : raw,
       String(formData.get("reason")),
       actor,
+      isDutyCode(dutyRaw) ? dutyRaw : null,
     );
     revalidatePath(`/teachers/${id}`);
     redirect(`/teachers/${id}?notice=${encodeURIComponent("Current Destination updated.")}`);
@@ -78,8 +90,7 @@ export default async function TeacherDetailsPage({
       <div className="page-header">
         <div>
           <h1>
-            {t.firstName} {t.middleName ? `${t.middleName} ` : ""}
-            {t.lastName} <StatusBadge status={t.status} />
+            {formatFullName(t)} <StatusBadge status={t.status} />
           </h1>
           <p>
             {t.teacherCode}
@@ -103,6 +114,7 @@ export default async function TeacherDetailsPage({
             <dt>First Name</dt><dd>{t.firstName}</dd>
             <dt>Middle Name</dt><dd>{t.middleName ?? "—"}</dd>
             <dt>Last Name</dt><dd>{t.lastName}</dd>
+            <dt>Suffix</dt><dd>{t.suffix ?? "—"}</dd>
             <dt>Birthday</dt><dd>{fmt(t.birthday)}</dd>
             <dt>Age</dt>
             <dd>{details.age !== null ? `${details.age} (always computed, never stored)` : "—"}</dd>
@@ -172,6 +184,11 @@ export default async function TeacherDetailsPage({
                   <Link href={`/dako/${details.currentDestination.id}`}>{details.currentDestination.name}</Link>
                 ) : "(missing dako record)"}
               </dd>
+              {/* New Update #6 — the duty held at the CURRENT destination, read
+                  from the destination relationship itself. An unrecorded duty
+                  renders as an em dash; it is never inferred. */}
+              <dt>Duty</dt>
+              <dd>{dutyLabel(details.currentDuty)}</dd>
               <dt>Dako Status</dt>
               <dd>
                 {details.currentDestination ? <StatusBadge status={details.currentDestination.status} /> : "—"}
@@ -185,19 +202,15 @@ export default async function TeacherDetailsPage({
           )}
           <p className="info-note">
             Current Destination is a reference assignment — it never modifies weekly assignments, assignment history, or availability.
+            Duty belongs to the destination relationship: it is recorded with the destination and preserved with it in history.
           </p>
           {canWrite ? (
             <form action={destinationAction} className="form-col">
               <input type="hidden" name="id" value={id} />
-              <label className="field">
-                <span>New Current Destination (ACTIVE dako only) — leave blank to clear</span>
-                <select name="newDestinationId" defaultValue="">
-                  <option value="">— none (clear Current Destination) —</option>
-                  {activeDako.rows.map((d) => (
-                    <option key={d.id} value={d.id}>{d.dakoCode} · {d.name}</option>
-                  ))}
-                </select>
-              </label>
+              <DestinationFields
+                dakos={activeDako.rows.map((d) => ({ id: d.id, dakoCode: d.dakoCode, name: d.name }))}
+                currentDuty={isDutyCode(details.currentDuty) ? details.currentDuty : null}
+              />
               <label className="field">
                 <span>Reason (required for set, change, or clear) <em aria-hidden="true"> *</em></span>
                 <textarea name="reason" rows={2} required />
@@ -245,6 +258,12 @@ export default async function TeacherDetailsPage({
                       <dt>Dako</dt>
                       <dd>{p.dakoName ?? "—"}</dd>
                     </div>
+                    {/* New Update #6 — the duty recorded FOR THIS PERIOD, so a
+                        historical destination keeps the duty held there. */}
+                    <div>
+                      <dt>Duty</dt>
+                      <dd>{dutyLabel(p.duty)}</dd>
+                    </div>
                     <div>
                       <dt>Date Destined</dt>
                       <dd>{p.startDate}</dd>
@@ -263,7 +282,8 @@ export default async function TeacherDetailsPage({
             </div>
           )}
           <p className="info-note">
-            One active period at a time; previous periods are preserved (never deleted) and survive inactivity or a disabled dako.
+            One active period per teacher, and one active period per (dako, duty) slot; previous periods are preserved
+            (never deleted) with the duty held there, and they survive inactivity or a disabled dako.
             Weekly Suguan assignments never create or modify these records.
           </p>
         </section>

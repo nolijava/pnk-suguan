@@ -7,7 +7,7 @@
  * REGENERATED_SCHEDULE audit row so history stays reconstructable even though
  * deleted rows cascade their assignment_history children.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb, withTransaction, type Database } from "@/server/db/client";
 import {
   assignments,
@@ -24,6 +24,12 @@ import type { SessionUser } from "@/server/auth/session";
 import { buildSchedulingContext } from "./scheduling/buildContext";
 import { allocate } from "./scheduling/scoring";
 import { eligibilityCheck } from "./scheduling/eligibility";
+import {
+  planDutyAssignments,
+  type DutyMode,
+  type DutyPlan,
+  type DutyRotationStats,
+} from "./scheduling/duty";
 import type {
   AllocationPlan,
   AssignmentType,
@@ -34,6 +40,14 @@ export interface GenerateResult {
   weekId: string;
   regenerated: boolean;
   plan: AllocationPlan;
+  inserted: number;
+}
+
+export interface DutyGenerateResult {
+  weekId: string;
+  mode: DutyMode;
+  regenerated: boolean;
+  plan: DutyPlan;
   inserted: number;
 }
 
@@ -117,6 +131,147 @@ export async function checkEligibility(input: {
     violatedRules: result.violatedRules,
     overrideAllowed: result.overrideAllowed,
   };
+}
+
+/**
+ * Guro Duty — generate (or regenerate) the duty-based schedule for a DRAFT
+ * week. Same lifecycle/guard rails as §13/§14 generateSchedule (week locked
+ * FOR UPDATE, go-live check, DRAFT-only) but the slot plan comes from each
+ * dako's own duty roster with deterministic fair rotation. Replaces only
+ * generation-produced rows (AUTO) on the APPLICABLE dakos; MANUAL/OVERRIDE
+ * rows survive untouched. The week ALWAYS remains DRAFT.
+ */
+export async function generateDutySchedule(
+  weekId: string,
+  mode: DutyMode,
+  actor: SessionUser,
+): Promise<DutyGenerateResult> {
+  return withTransaction(async (tx) => {
+    const locked = await tx
+      .select()
+      .from(weeks)
+      .where(eq(weeks.id, weekId))
+      .for("update")
+      .limit(1);
+    const week = locked[0];
+    if (!week) throw new NotFoundError("week not found");
+    if (!isNormalSchedulingWeek(week.year, week.isoWeekNumber)) {
+      throw new HistoricalWeekError(
+        `week ${week.year}-W${week.isoWeekNumber} is before the scheduling go-live ` +
+          `(${SCHEDULING_GO_LIVE.year}-W${SCHEDULING_GO_LIVE.week}); historical weeks are recorded via the Historical Backfill workflow only`,
+      );
+    }
+    if (week.status !== "DRAFT") {
+      throw new ConflictError(
+        `schedule generation requires a DRAFT week (week is ${week.status})`,
+      );
+    }
+
+    const ctx = await buildSchedulingContext(weekId, tx as unknown as Database);
+
+    // Fair-rotation history for THIS mode (all weeks, per teacher × dako) —
+    // what makes the rotation fair AND reconstructable (#7).
+    const statRows = await tx
+      .select({
+        teacherId: assignments.teacherId,
+        dakoId: assignments.dakoId,
+        sugoPicks: sql<number>`count(*) filter (where ${assignments.assignmentType} = 'SUGO')::int`,
+        reserbaPicks: sql<number>`count(*) filter (where ${assignments.assignmentType} = 'RESERBA')::int`,
+        reserbaIiPicks: sql<number>`count(*) filter (where ${assignments.assignmentType} = 'RESERBA_II')::int`,
+        lastPickedAt: sql<string | null>`max(${assignments.assignedAt})::text`,
+      })
+      .from(assignments)
+      .where(and(eq(assignments.generationMode, mode), eq(assignments.status, "ASSIGNED")))
+      .groupBy(assignments.teacherId, assignments.dakoId);
+    const rotation = new Map<string, DutyRotationStats>();
+    for (const r of statRows) {
+      rotation.set(`${r.teacherId}|${r.dakoId}`, {
+        sugoPicks: r.sugoPicks,
+        reserbaPicks: r.reserbaPicks,
+        reserbaIiPicks: r.reserbaIiPicks,
+        lastPickedAt: r.lastPickedAt,
+      });
+    }
+
+    const plan = planDutyAssignments(ctx, mode, rotation);
+
+    // Replace generation-produced rows (AUTO) inside the APPLICABLE dakos
+    // only. Snapshot first so regeneration stays fully audited.
+    const plannedDakoIds = [...new Set(plan.slots.map((s) => s.dakoId))];
+    const existingAuto =
+      plannedDakoIds.length > 0
+        ? await tx
+            .select()
+            .from(assignments)
+            .where(
+              and(
+                eq(assignments.weekId, weekId),
+                eq(assignments.assignmentSource, "AUTO"),
+                inArray(assignments.dakoId, plannedDakoIds),
+              ),
+            )
+        : [];
+    if (existingAuto.length > 0) {
+      await tx.execute(sql`select set_config('pnk.regeneration_cascade', 'on', true)`);
+      await tx
+        .delete(assignments)
+        .where(
+          and(
+            eq(assignments.weekId, weekId),
+            eq(assignments.assignmentSource, "AUTO"),
+            inArray(assignments.dakoId, plannedDakoIds),
+          ),
+        );
+    }
+
+    const rowsToInsert = [];
+    for (const s of plan.slots) {
+      if (s.teacherId === null) continue;
+      rowsToInsert.push({
+        weekId,
+        dakoId: s.dakoId,
+        teacherId: s.teacherId,
+        assignmentType: s.assignmentType,
+        assignmentSource: "AUTO" as const,
+        status: "ASSIGNED" as const,
+        isOverride: false,
+        assignedBy: actor.userId,
+        generationMode: mode,
+      });
+    }
+    if (rowsToInsert.length > 0) {
+      await tx.insert(assignments).values(rowsToInsert);
+    }
+
+    const regenerated = existingAuto.length > 0;
+    await audit(
+      {
+        user: actor,
+        action: "GENERATED_DUTY_SCHEDULE",
+        entityType: "week",
+        entityId: weekId,
+        oldValue: regenerated
+          ? {
+              week: { id: week.id, year: week.year, isoWeekNumber: week.isoWeekNumber, status: week.status },
+              previousAutoAssignments: snapshotOf(existingAuto),
+            }
+          : null,
+        newValue: {
+          week: { id: week.id, year: week.year, isoWeekNumber: week.isoWeekNumber, status: week.status },
+          role: (actor as SessionUser & { roleCodes?: string[] }).roleCodes ?? [],
+          generationMode: mode,
+          inserted: rowsToInsert.length,
+          // Full per-slot decision trail (dako, teacher, duty, type, source,
+          // rotation stats) — the fair-rotation outcome is reconstructable.
+          plan: plan.slots,
+        },
+        reason: `mode=${mode}`,
+      },
+      tx as unknown as Database,
+    );
+
+    return { weekId, mode, regenerated, plan, inserted: rowsToInsert.length };
+  });
 }
 
 /**

@@ -16,6 +16,8 @@ export type Permission =
   | "scheduling.generate"
   // notifications
   | "notifications.read" | "notifications.write"
+  // backup / restore (Update #18)
+  | "backups.read" | "backups.write" | "backups.restore"
   // audit + reports
   | "audit.read" | "reports.read";
 
@@ -29,6 +31,7 @@ const ADMIN: Permission[] = [
   "assignments.history.read", "assignments.counts.read",
   "scheduling.generate",
   "notifications.read", "notifications.write",
+  "backups.read", "backups.write", "backups.restore",
   "audit.read", "reports.read",
 ];
 
@@ -44,14 +47,17 @@ const SCHEDULER: Permission[] = [
   "assignments.history.read", "assignments.counts.read",
   "scheduling.generate",
   "notifications.read",
+  "backups.read", "backups.write",
   "reports.read",
 ];
 
+// VIEWER is strictly read-only everywhere — including backups: it can see the
+// backup list (backups.read) but never create or, above all, restore one.
 const VIEWER: Permission[] = [
   "teachers.read", "dako.read", "weeks.read",
   "availability.read", "assignments.read",
   "assignments.history.read", "assignments.counts.read",
-  "notifications.read", "reports.read",
+  "notifications.read", "backups.read", "reports.read",
 ];
 
 // SUPER_ADMIN is authorized for the exceptional PUBLISHED Suguan unlock
