@@ -1,6 +1,6 @@
 # PNK Teacher Assignment & Suguan Management System
 
-Scheduling and administrative system for PNK (Pagkakaisa ng mga Kabataan) dako worship-service assignments: teacher master data, weekly availability, a deterministic scheduling engine (SUGO → RESERBA → RESERBA II), week lifecycle (DRAFT → FINALIZED → PUBLISHED), assignment history, audit logs, reports, notifications, and a print-ready Weekly Suguan PDF.
+Scheduling and administrative system for PNK (Pagsamba Ng Kabataan) dako worship-service assignments: teacher master data, weekly availability, a deterministic scheduling engine (SUGO → RESERBA → RESERBA II), week lifecycle (DRAFT → FINALIZED → PUBLISHED), assignment history, audit logs, reports, notifications, and a print-ready Weekly Suguan PDF.
 
 ## Stack
 
