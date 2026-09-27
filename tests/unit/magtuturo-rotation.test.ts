@@ -1,41 +1,52 @@
-/**
- * Guro Duty × Magtuturo — pure rotation helper: the per-dako candidate queues
- * (each already carrying its within-dako fair rotation) are interleaved so
- * week-level teaching seats are shared fairly ACROSS dakos. No DB.
- */
-import { describe, it, expect } from "vitest";
-import { roundRobinByDako } from "@/server/services/magtuturo.service";
+import { describe, expect, it } from "vitest";
+import {
+  compareMagtuturoRotation,
+  type MagtuturoRotationCandidate,
+} from "@/server/services/magtuturo.service";
 
-describe("roundRobinByDako — fair share across dako rosters", () => {
-  it("interleaves level 0 of every dako first, then level 1 (round-robin)", () => {
-    expect(
-      roundRobinByDako([
-        ["a1", "a2", "a3", "a4"],
-        ["b1", "b2", "b3", "b4"],
-      ]),
-    ).toEqual(["a1", "b1", "a2", "b2", "a3", "b3", "a4", "b4"]);
+function candidate(
+  teacherId: string,
+  count: number,
+  lastAssignment: number,
+): MagtuturoRotationCandidate {
+  return { teacherId, count, lastAssignment };
+}
+
+describe("Magtuturo fair-rotation ordering", () => {
+  it("prioritizes the lowest cumulative Magtuturo assignment count", () => {
+    const ordered = [
+      candidate("teacher-c", 3, 1),
+      candidate("teacher-b", 1, 100),
+      candidate("teacher-a", 2, 1),
+    ].sort(compareMagtuturoRotation);
+
+    expect(ordered.map((teacher) => teacher.teacherId)).toEqual([
+      "teacher-b",
+      "teacher-a",
+      "teacher-c",
+    ]);
   });
 
-  it("uneven rosters never block the smaller dako from its share", () => {
-    expect(
-      roundRobinByDako([
-        ["a1", "a2", "a3"],
-        ["b1"],
-        ["c1", "c2"],
-      ]),
-    ).toEqual(["a1", "b1", "c1", "a2", "c2", "a3"]);
+  it("ranks the older last Magtuturo assignment first when counts are equal", () => {
+    const older = candidate("teacher-z-older", 2, Date.parse("2024-01-10T12:00:00Z"));
+    const newer = candidate("teacher-a-newer", 2, Date.parse("2024-01-20T12:00:00Z"));
+
+    expect([newer, older].sort(compareMagtuturoRotation)).toEqual([older, newer]);
+    expect(compareMagtuturoRotation(older, newer)).toBeLessThan(0);
   });
 
-  it("handles empty queues and preserves the caller's dako order", () => {
-    expect(roundRobinByDako([[], ["b1"], []])).toEqual(["b1"]);
-    expect(roundRobinByDako([])).toEqual([]);
+  it("ranks teachers with no Magtuturo history before teachers with history", () => {
+    const neverAssigned = candidate("teacher-never", 0, 0);
+    const assignedEarlier = candidate("teacher-assigned", 1, Date.parse("2020-01-01T00:00:00Z"));
+
+    expect(compareMagtuturoRotation(neverAssigned, assignedEarlier)).toBeLessThan(0);
   });
 
-  it("is deterministic — identical queues give identical order", () => {
-    const q = [
-      ["a1", "a2"],
-      ["b1", "b2"],
-    ];
-    expect(roundRobinByDako(q)).toEqual(roundRobinByDako(q));
+  it("uses the teacher identifier as a deterministic final tie-break", () => {
+    const first = candidate("teacher-a", 2, 123);
+    const second = candidate("teacher-b", 2, 123);
+
+    expect(compareMagtuturoRotation(first, second)).toBeLessThan(0);
+    expect(compareMagtuturoRotation(second, first)).toBeGreaterThan(0);
   });
 });

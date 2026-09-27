@@ -32,6 +32,7 @@ const RULE_LABEL: Record<string, string> = {
   INACTIVE_WEEKLY: "Weekly availability INACTIVE",
   ENGLISH_DAKO_EXCLUSION: "Assigned to an English Dako this week",
   OATH_DATE_NOT_REACHED: "Oath-taking date not yet reached",
+  ALREADY_ASSIGNED_MAGTUTURO: "Already assigned to a Magtuturo seat this week",
   WEEK_PUBLISHED: "Week is PUBLISHED — unlock first",
 };
 
@@ -39,6 +40,7 @@ export function MagtuturoActions({
   weekId,
   weekYear,
   weekNumber,
+  monthYear,
   weekStatus,
   serviceDate,
   canWrite,
@@ -49,6 +51,7 @@ export function MagtuturoActions({
   weekId: string;
   weekYear: number;
   weekNumber: number;
+  monthYear: number;
   weekStatus: "DRAFT" | "FINALIZED" | "PUBLISHED";
   serviceDate: string;
   canWrite: boolean;
@@ -100,11 +103,11 @@ export function MagtuturoActions({
           body: JSON.stringify(body),
         });
         const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j?.error?.message ?? "Request failed.");
         if (j.data && j.data.ok === false) {
           setError(`${j.data.reason}${j.data.violatedRules?.length ? ` (${j.data.violatedRules.join(", ")})` : ""}`);
           return;
         }
+        if (!res.ok) throw new Error(j?.error?.message ?? "Request failed.");
         setAssignSeat(null);
         setSelected(null);
         setFilter("");
@@ -124,7 +127,7 @@ export function MagtuturoActions({
         const body =
           genMode === "week"
             ? { mode: "week", weekId }
-            : { mode: "month", year: weekYear, month: Number(genMonth) };
+            : { mode: "month", year: monthYear, month: Number(genMonth) };
         const res = await fetch("/api/magtuturo/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -132,9 +135,14 @@ export function MagtuturoActions({
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(j?.error?.message ?? "Generation failed.");
-        const detail: string[] =
-          j.data?.weeks ? j.data.weeks.flatMap((w: { detail: string[] }) => w.detail) : j.data?.detail ?? [];
-        setGenDetail(detail);
+        const detail: string[] = j.data?.weeks
+          ? j.data.weeks.map((w: { year?: number; isoWeekNumber?: number; created: number; skipped: boolean; reason?: string; detail: string[] }) => {
+              const weekLabel = w.year && w.isoWeekNumber ? `Week ${w.isoWeekNumber} · ${w.year}` : "ISO week";
+              const outcome = w.skipped ? `skipped${w.reason ? ` — ${w.reason}` : ""}` : `${w.created} assignment(s) generated`;
+              return `${weekLabel}: ${outcome}${w.detail.length ? ` · ${w.detail.join(" · ")}` : ""}`;
+            })
+          : j.data?.detail ?? [];
+        setGenDetail(detail.length > 0 ? detail : [j.data?.skipped ? j.data.reason ?? "Generation skipped." : `Generated ${j.data?.created ?? 0} assignment(s).`]);
         setGenOpen(false); // reveal the result banner — don't leave the dialog up
         router.refresh();
       } catch (e) {
@@ -166,14 +174,24 @@ export function MagtuturoActions({
         <td className="actions-col">
           {editable && (
             row ? (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={pending}
-                onClick={() => clearSeat(magType, seat)}
-              >
-                Clear
-              </button>
+              <div className="actions-row">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={pending}
+                  onClick={() => setAssignSeat({ magType, seat })}
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={pending}
+                  onClick={() => clearSeat(magType, seat)}
+                >
+                  Clear
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
@@ -198,9 +216,12 @@ export function MagtuturoActions({
       )}
 
       {canGenerate && weekStatus === "DRAFT" && (
-        <p>
-          <button type="button" className="btn btn-primary" disabled={pending} onClick={() => setGenOpen(true)}>
-            Generate Mga Magtuturo
+        <p className="actions-row">
+          <button type="button" className="btn btn-primary" disabled={pending} onClick={() => { setGenMode("week"); setGenOpen(true); }}>
+            Generate Weekly
+          </button>
+          <button type="button" className="btn btn-secondary" disabled={pending} onClick={() => { setGenMode("month"); setGenOpen(true); }}>
+            Generate Monthly
           </button>
         </p>
       )}
@@ -232,27 +253,25 @@ export function MagtuturoActions({
 
       {genOpen && (
         <Modal open={genOpen} onClose={() => !pending && setGenOpen(false)}>
-          <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Generate Mga Magtuturo sa Klase">
+          <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={genMode === "week" ? "Generate Weekly Magtuturo" : "Generate Monthly Magtuturo"}>
             <div className="modal">
-              <h2>Generate Mga Magtuturo sa Klase</h2>
-              <p>Select the generation period. Confirming will create assignments (4 SUGO + 2 RESERBA per week) in <strong>DRAFT</strong>.</p>
-              <label className="form-field">
-                <span>Generation period</span>
-                <select value={genMode} onChange={(e) => setGenMode(e.target.value as "week" | "month")}>
-                  <option value="week">Regular Weekly — Week {weekNumber}</option>
-                  <option value="month">Monthly</option>
-                </select>
-              </label>
-              {genMode === "month" && (
+              <h2>{genMode === "week" ? "Generate Weekly Mga Magtuturo" : "Generate Monthly Mga Magtuturo"}</h2>
+              <p>
+                {genMode === "week"
+                  ? `Generate Magtuturo for ISO Week ${weekNumber}, ${weekYear}.`
+                  : `Generate Magtuturo week-by-week for every ISO week overlapping the selected Gregorian month in ${monthYear}. Existing or locked weeks are skipped.`}
+                {" "}Each generated week targets 4 SUGO + 2 RESERBA and remains <strong>DRAFT</strong>.
+              </p>
+              {genMode === "month" ? (
                 <label className="form-field">
-                  <span>Month</span>
+                  <span>Month · {monthYear}</span>
                   <select value={genMonth} onChange={(e) => setGenMonth(e.target.value)}>
                     {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")).map((m) => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
                 </label>
-              )}
+              ) : null}
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" disabled={pending} onClick={() => setGenOpen(false)}>
                   Cancel
