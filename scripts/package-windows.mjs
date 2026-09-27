@@ -214,6 +214,16 @@ copy(PGSQL_SRC, path.join(OUT, "postgres"), "postgres/ (bundled PostgreSQL 16: b
 copy(path.join(STANDALONE, "server.js"), path.join(APP, "server.js"), "app/server.js");
 copy(path.join(STANDALONE, "node_modules"), path.join(APP, "node_modules"), "app/node_modules/ (traced runtime dependencies)");
 copy(path.join(STANDALONE, ".next"), path.join(APP, ".next"), "app/.next/ (production build)");
+// Next standalone copies repository-local .env files for runtime convenience.
+// They are never part of the portable payload: the launcher owns each
+// installation's generated credentials under its separate DATA_DIR instead.
+for (const envFile of [".env", ".env.local", ".env.production", ".env.production.local"]) {
+  const standaloneEnv = path.join(APP, envFile);
+  if (existsSync(standaloneEnv)) {
+    rmSync(standaloneEnv, { force: true });
+    ok(`excluded ${path.relative(OUT, standaloneEnv)} from portable payload`);
+  }
+}
 // Next does not copy these into standalone automatically.
 copy(path.join(ROOT, ".next", "static"), path.join(APP, ".next", "static"), "app/.next/static/ (client assets)");
 copy(path.join(ROOT, "public"), path.join(APP, "public"), "app/public/ (static assets)");

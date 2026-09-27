@@ -8,7 +8,7 @@
  * not build the application, change the launcher, or own any runtime
  * responsibility.
  *
- * Usage:  .tools/node/node.exe scripts/build-installer.mjs [--out-dir dist] [--payload-dir dist/PNK-Suguan]
+ * Usage:  .tools/node/node.exe scripts/build-installer.mjs [--out-dir dist] [--payload-dir dist/PNK-Suguan] [--build-dir .freebuff/l6/build]
  */
 
 import { spawnSync } from "node:child_process";
@@ -30,7 +30,7 @@ const OUT_DIR = argValue("--out-dir") ?? "dist";
 const PAYLOAD_DIR = path.resolve(
   argValue("--payload-dir") ?? path.join(ROOT, OUT_DIR, "PNK-Suguan"),
 );
-const BUILD_DIR = path.join(ROOT, ".freebuff", "l6", "build");
+const BUILD_DIR = path.resolve(argValue("--build-dir") ?? path.join(ROOT, ".freebuff", "l6", "build"));
 const SOURCE = path.join(ROOT, "installer", "PnkSuguanSetup.cs");
 /**
  * Shipped brand icon: it gives the setup EXE (and its copy, the uninstaller that
@@ -147,8 +147,13 @@ if (!existsSync(ICON)) {
 
 const manifest = JSON.parse(readFileSync(path.join(PAYLOAD_DIR, "BUILD-MANIFEST.json"), "utf8"));
 const version = readFileSync(SOURCE, "utf8").match(/APP_VERSION = "([^"]+)"/)?.[1];
+const packageVersion = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
 if (!version) {
   fail("could not read APP_VERSION from the installer source");
+  process.exit(1);
+}
+if (version !== packageVersion || version !== manifest.appVersion) {
+  fail(`version mismatch: installer=${version}, package=${packageVersion}, payload=${manifest.appVersion}`);
   process.exit(1);
 }
 say(`  payload  ${manifest.fileCount} files, ${mb(manifest.totalBytes)}`);
