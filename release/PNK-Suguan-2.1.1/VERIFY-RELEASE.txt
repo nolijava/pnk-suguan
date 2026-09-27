@@ -1,0 +1,47 @@
+VERIFYING THE PNK SUGUAN 2.1.1 INSTALLER
+
+Before you run anything, confirm that the installer file you received is bit-for-bit the validated release. This takes about ten seconds and protects you from a corrupted download or a tampered file.
+
+Expected SHA-256 of PNK-Suguan-Setup-2.1.1.exe:
+
+    0470abb8d781041e521219b88189d2e02956556d44d3eda50bbcb140bbbbcd8f
+
+The hash must match EXACTLY. If it does not match, do not install the file — obtain it again from your distribution source and re-verify. The same value is in PNK-Suguan-Setup-2.1.1.sha256 and in the "installerSha256" field of PNK-Suguan-Setup-2.1.1.json.
+
+METHOD 1 — certutil (available on every supported Windows version)
+
+1. Open Command Prompt (press Win, type cmd, press Enter).
+2. Change to the folder holding the installer, for example:
+
+       cd "%USERPROFILE%\Downloads\PNK-Suguan-2.1.1"
+
+3. Run:
+
+       certutil -hashfile "PNK-Suguan-Setup-2.1.1.exe" SHA256
+
+4. Compare the printed hash with the expected value above. certutil prints the hash with spaces between byte pairs; spacing does not matter — the sequence of characters must be identical.
+
+METHOD 2 — PowerShell
+
+1. Open PowerShell.
+2. Run:
+
+       Get-FileHash "PNK-Suguan-Setup-2.1.1.exe" -Algorithm SHA256
+
+3. Compare with the expected value (case-insensitive).
+
+METHOD 3 — Git Bash / sha256sum
+
+    sha256sum PNK-Suguan-Setup-2.1.1.exe
+
+METHOD 4 — verify every file in this package
+
+MANIFEST.sha256 lists the SHA-256 of every file in this package in the standard checksum format. With Git for Windows installed (or any sha256sum), run from this folder:
+
+    sha256sum -c MANIFEST.sha256
+
+Every line must report OK. MANIFEST.sha256 lists every file except itself — a checksum file cannot contain its own hash.
+
+AFTER VERIFICATION
+
+Follow INSTALLATION-GUIDE.pdf. This release applies NO database migration. **Upgrading from 2.1.0:** stop the running application, take a backup, then install — the installer replaces program files only and preserves the separate user-data directory. If your machine already received the earlier internal 2.1.1 build ("20260927-2.1.1-patch"), installing this release is still correct: it fully supersedes that build.
